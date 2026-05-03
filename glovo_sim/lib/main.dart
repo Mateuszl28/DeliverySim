@@ -546,6 +546,8 @@ enum CourierState {
   toRestaurant,
   atRestaurantWaiting,
   atRestaurantReady,
+  itemsCheck,
+  customerCalling,
   takingPhoto,
   orderCancelled,
   toCustomer,
@@ -633,6 +635,26 @@ class _CourierHomeState extends State<CourierHome>
   Timer? _stackOfferTimer;
   bool _stackOfferActive = false;
   Order? _pendingStackOffer;
+
+  // Pickup code entry
+  String _enteredCode = '';
+  int _wrongCodeAttempts = 0;
+  bool _codeShake = false;
+
+  // Items check
+  final Set<int> _itemsChecked = {};
+
+  // Route — speedometer + turns + traffic light
+  double _currentSpeedKmh = 0;
+  String? _currentTurn;
+  bool _trafficLightActive = false;
+  int _trafficLightSec = 0;
+
+  // Customer arrival sub-state
+  int _customerPhase = 0; // 0=knocking, 1=opened, 2=noAnswer, 3=leaveAtDoor
+  int _knockCount = 0;
+  Timer? _knockTimer;
+  Timer? _customerCallTimer;
 
   final List<CompletedDelivery> _history = [];
   late List<Goal> _goals;
@@ -992,6 +1014,8 @@ class _CourierHomeState extends State<CourierHome>
     _prepTimer?.cancel();
     _eventBannerTimer?.cancel();
     _stackOfferTimer?.cancel();
+    _knockTimer?.cancel();
+    _customerCallTimer?.cancel();
     super.dispose();
   }
 
@@ -1388,16 +1412,143 @@ class _CourierHomeState extends State<CourierHome>
     });
   }
 
-  void _confirmPickup() {
+  // ===== KEYPAD =====
+  void _typeKey(String d) {
+    if (_enteredCode.length >= 4) return;
+    HapticFeedback.lightImpact();
+    setState(() => _enteredCode += d);
+    if (_enteredCode.length == 4) {
+      final correct = _currentOrder?.pickupCode == _enteredCode;
+      if (correct) {
+        HapticFeedback.heavyImpact();
+        SystemSound.play(SystemSoundType.click);
+        Timer(const Duration(milliseconds: 350), () {
+          if (!mounted) return;
+          setState(() {
+            _state = CourierState.itemsCheck;
+            _enteredCode = '';
+            _wrongCodeAttempts = 0;
+            _itemsChecked.clear();
+          });
+        });
+      } else {
+        HapticFeedback.heavyImpact();
+        setState(() {
+          _codeShake = true;
+          _wrongCodeAttempts++;
+        });
+        Timer(const Duration(milliseconds: 600), () {
+          if (!mounted) return;
+          setState(() {
+            _enteredCode = '';
+            _codeShake = false;
+          });
+        });
+        _toast('Niepoprawny kod', glovoRed);
+      }
+    }
+  }
+
+  void _backspaceKey() {
+    if (_enteredCode.isEmpty) return;
+    HapticFeedback.selectionClick();
+    setState(() =>
+        _enteredCode = _enteredCode.substring(0, _enteredCode.length - 1));
+  }
+
+  // ===== ITEMS CHECK =====
+  void _toggleItem(int idx) {
+    HapticFeedback.lightImpact();
+    setState(() {
+      if (_itemsChecked.contains(idx)) {
+        _itemsChecked.remove(idx);
+      } else {
+        _itemsChecked.add(idx);
+      }
+    });
+  }
+
+  void _confirmItemsAndDrive() {
     HapticFeedback.mediumImpact();
     setState(() {
       _state = CourierState.toCustomer;
       _routeProgress = 0;
+      _itemsChecked.clear();
     });
-    _runRoute(onComplete: () {
-      if (!mounted) return;
-      setState(() => _state = CourierState.atCustomer);
+    _runRoute(onComplete: _onArriveAtCustomer);
+  }
+
+  // ===== CUSTOMER ARRIVAL =====
+  void _onArriveAtCustomer() {
+    if (!mounted) return;
+    setState(() {
+      _state = CourierState.atCustomer;
+      _customerPhase = 0;
+      _knockCount = 0;
     });
+    HapticFeedback.mediumImpact();
+    _knockTimer?.cancel();
+    // 3 knocks, then resolve outcome
+    _knockTimer = Timer.periodic(const Duration(milliseconds: 700), (t) {
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
+      if (_state != CourierState.atCustomer || _customerPhase != 0) {
+        t.cancel();
+        return;
+      }
+      setState(() => _knockCount++);
+      HapticFeedback.lightImpact();
+      if (_knockCount >= 3) {
+        t.cancel();
+        _resolveCustomerOutcome();
+      }
+    });
+  }
+
+  void _resolveCustomerOutcome() {
+    final r = _rng.nextDouble();
+    int outcome;
+    final o = _currentOrder!;
+    if (o.isRegular) {
+      // Regular customers always answer
+      outcome = 1;
+    } else if (r < 0.70) {
+      outcome = 1; // opens
+    } else if (r < 0.90) {
+      outcome = 2; // no answer → call
+    } else {
+      outcome = 3; // leave at door
+    }
+    if (outcome == 2) {
+      // Phone call
+      setState(() {
+        _state = CourierState.customerCalling;
+      });
+      HapticFeedback.mediumImpact();
+      SystemSound.play(SystemSoundType.alert);
+      _customerCallTimer = Timer(const Duration(milliseconds: 3500), () {
+        if (!mounted) return;
+        // 50% answers after call, 50% asks to leave at door
+        final answered = _rng.nextDouble() < 0.5;
+        setState(() {
+          _state = CourierState.atCustomer;
+          _customerPhase = answered ? 1 : 3;
+        });
+        if (!answered) {
+          _showEventBanner('${_currentOrder?.customer ?? "Klient"}: '
+              '"Zostaw pod drzwiami, dziękuję!"', glovoBlue);
+        }
+      });
+    } else {
+      setState(() {
+        _customerPhase = outcome;
+      });
+      if (outcome == 3) {
+        _showEventBanner('Instrukcja: zostaw zamówienie pod drzwiami', glovoBlue);
+      }
+    }
   }
 
   void _handOver() {
@@ -1934,15 +2085,44 @@ class _CourierHomeState extends State<CourierHome>
     final baseSec = (o.distanceKm * secPerKm).clamp(2.5, 30);
     var totalSteps = (baseSec * 10).round();
     final trafficChance = _ownedGear.contains('phone') ? 0.005 : 0.012;
+    final trafficLightChance = 0.008;
     var step = 0;
     var slowdownStepsLeft = 0;
     var trafficTriggered = false;
+    var trafficLightUsed = false;
     var phoneTriggered = false;
+
+    // Initial speed
+    setState(() {
+      _currentSpeedKmh = _vehicle.speedKmh.toDouble();
+      _trafficLightActive = false;
+      _currentTurn = _turnAt(0, goingTo: _state == CourierState.toRestaurant
+          ? o.partnerAddress
+          : o.customerAddress);
+    });
+
     _progressTimer = Timer.periodic(const Duration(milliseconds: 100), (t) {
       if (!mounted) {
         t.cancel();
         return;
       }
+
+      // Traffic light tick
+      if (_trafficLightActive) {
+        if (step % 10 == 0) {
+          setState(() {
+            _trafficLightSec--;
+            _currentSpeedKmh = 0;
+          });
+          if (_trafficLightSec <= 0) {
+            setState(() => _trafficLightActive = false);
+            HapticFeedback.lightImpact();
+            _showEventBanner('Zielone — jedziesz', glovoGreen);
+          }
+        }
+        return; // freeze progress
+      }
+
       // Stacked-order offer chance (only on toCustomer leg)
       if (_state == CourierState.toCustomer &&
           step > totalSteps * 0.20 &&
@@ -1950,7 +2130,7 @@ class _CourierHomeState extends State<CourierHome>
           step % 10 == 0) {
         _maybeOfferStack();
       }
-      // Random events during route (only after some progress)
+      // Random events during route
       if (!trafficTriggered &&
           step > totalSteps * 0.25 &&
           step < totalSteps * 0.75 &&
@@ -1959,6 +2139,20 @@ class _CourierHomeState extends State<CourierHome>
         slowdownStepsLeft = 25 + _rng.nextInt(20);
         totalSteps += slowdownStepsLeft ~/ 2;
         _showEventBanner('Korek na trasie — opóźnienie', glovoOrange);
+        HapticFeedback.lightImpact();
+      }
+      if (!trafficLightUsed &&
+          step > totalSteps * 0.30 &&
+          step < totalSteps * 0.70 &&
+          _rng.nextDouble() < trafficLightChance) {
+        trafficLightUsed = true;
+        setState(() {
+          _trafficLightActive = true;
+          _trafficLightSec = 3 + _rng.nextInt(4);
+        });
+        HapticFeedback.mediumImpact();
+        SystemSound.play(SystemSoundType.alert);
+        return;
       }
       if (!phoneTriggered &&
           _state == CourierState.toCustomer &&
@@ -1977,12 +2171,46 @@ class _CourierHomeState extends State<CourierHome>
         }
       }
       step++;
-      setState(() => _routeProgress = (step / totalSteps).clamp(0.0, 1.0));
+      // Update speed (varies slightly)
+      var speed = _vehicle.speedKmh.toDouble();
+      if (slowdownStepsLeft > 0) speed *= 0.4;
+      if (_weather == Weather.rainy) speed *= 0.85;
+      if (_weather == Weather.heavyRain) speed *= 0.65;
+      speed += _rng.nextDouble() * 4 - 2;
+      // Update turn instruction at 25%/50%/75%/95%
+      final progress = step / totalSteps;
+      final turn = _turnAt(progress,
+          goingTo: _state == CourierState.toRestaurant
+              ? o.partnerAddress
+              : o.customerAddress);
+      setState(() {
+        _routeProgress = progress.clamp(0.0, 1.0);
+        _currentSpeedKmh = speed.clamp(0, 60);
+        _currentTurn = turn;
+      });
       if (step >= totalSteps) {
         t.cancel();
+        setState(() {
+          _currentSpeedKmh = 0;
+          _currentTurn = null;
+        });
         onComplete();
       }
     });
+  }
+
+  String _turnAt(double progress, {required String goingTo}) {
+    if (progress < 0.20) {
+      return 'Jedź prosto';
+    } else if (progress < 0.45) {
+      return 'Skręć w prawo w al. Niepodległości';
+    } else if (progress < 0.70) {
+      return 'Jedź prosto przez rondo';
+    } else if (progress < 0.90) {
+      return 'Skręć w lewo w $goingTo';
+    } else {
+      return 'Cel jest po prawej';
+    }
   }
 
   void _toast(String msg, Color color) {
@@ -2551,10 +2779,14 @@ class _CourierHomeState extends State<CourierHome>
         return _waitingAtRestaurantView();
       case CourierState.atRestaurantReady:
         return _pickupCodeView();
+      case CourierState.itemsCheck:
+        return _itemsCheckView();
       case CourierState.orderCancelled:
         return _cancelledView();
       case CourierState.atCustomer:
         return _atCustomerView();
+      case CourierState.customerCalling:
+        return _customerCallingView();
       case CourierState.takingPhoto:
         return _photoView();
       case CourierState.ratingPending:
@@ -4365,22 +4597,60 @@ class _CourierHomeState extends State<CourierHome>
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Expanded(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(20),
-              child: AnimatedBuilder(
-                animation: _rainCtrl,
-                builder: (_, _) => CustomPaint(
-                  painter: _MapPainter(
-                    progress: _routeProgress,
-                    pinColor:
-                        goingToRestaurant ? o.category.color : glovoGreen,
-                    weather: _weather,
-                    rainPhase: _rainCtrl.value,
-                    vehicleIcon: _vehicle.icon,
+            child: Stack(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(20),
+                  child: AnimatedBuilder(
+                    animation: _rainCtrl,
+                    builder: (_, _) => CustomPaint(
+                      painter: _MapPainter(
+                        progress: _routeProgress,
+                        pinColor:
+                            goingToRestaurant ? o.category.color : glovoGreen,
+                        weather: _weather,
+                        rainPhase: _rainCtrl.value,
+                        vehicleIcon: _vehicle.icon,
+                      ),
+                      child: const SizedBox.expand(),
+                    ),
                   ),
-                  child: const SizedBox.expand(),
                 ),
-              ),
+                if (_currentTurn != null)
+                  Positioned(
+                    top: 10,
+                    left: 10,
+                    right: 10,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.65),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.directions_rounded,
+                              color: glovoYellow, size: 18),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(_currentTurn!,
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 13)),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                Positioned(
+                  bottom: 10,
+                  left: 10,
+                  child: _speedometer(),
+                ),
+                if (_trafficLightActive) _trafficLightOverlay(),
+              ],
             ),
           ),
           const SizedBox(height: 12),
@@ -4459,6 +4729,79 @@ class _CourierHomeState extends State<CourierHome>
         if (_stackOfferActive && _pendingStackOffer != null)
           _buildStackOfferOverlay(_pendingStackOffer!),
       ],
+    );
+  }
+
+  Widget _speedometer() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.65),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.speed_rounded, color: glovoYellow, size: 18),
+          const SizedBox(width: 6),
+          Text(_currentSpeedKmh.round().toString(),
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w900)),
+          const SizedBox(width: 3),
+          const Text('km/h',
+              style: TextStyle(color: glovoMuted, fontSize: 10)),
+        ],
+      ),
+    );
+  }
+
+  Widget _trafficLightOverlay() {
+    return Positioned.fill(
+      child: Container(
+        decoration: BoxDecoration(
+          color: glovoRed.withValues(alpha: 0.25),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Center(
+          child: Container(
+            padding: const EdgeInsets.symmetric(
+                horizontal: 18, vertical: 14),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.85),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 50,
+                  height: 50,
+                  decoration: const BoxDecoration(
+                    color: glovoRed,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                          color: glovoRed,
+                          blurRadius: 16,
+                          spreadRadius: 2),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                const Text('Czerwone światło',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800)),
+                Text('${_trafficLightSec}s',
+                    style: const TextStyle(
+                        color: glovoYellow, fontSize: 14)),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -4579,6 +4922,9 @@ class _CourierHomeState extends State<CourierHome>
 
   Widget _waitingAtRestaurantView() {
     final o = _currentOrder!;
+    final fraction = 1 - (_prepCountdown / o.prepSeconds);
+    final phaseStr = _prepPhaseLabel(fraction);
+    final queuePos = _prepQueuePos(fraction);
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
@@ -4589,11 +4935,11 @@ class _CourierHomeState extends State<CourierHome>
               alignment: Alignment.center,
               children: [
                 SizedBox(
-                  width: 130,
-                  height: 130,
+                  width: 150,
+                  height: 150,
                   child: CircularProgressIndicator(
-                    value: 1 - (_prepCountdown / o.prepSeconds),
-                    strokeWidth: 8,
+                    value: fraction,
+                    strokeWidth: 9,
                     backgroundColor: glovoCardLight,
                     valueColor:
                         const AlwaysStoppedAnimation(glovoYellow),
@@ -4602,86 +4948,391 @@ class _CourierHomeState extends State<CourierHome>
                 Column(
                   children: [
                     Icon(o.category.icon,
-                        color: o.category.color, size: 38),
+                        color: o.category.color, size: 40),
                     const SizedBox(height: 4),
                     Text('${_prepCountdown}s',
                         style: const TextStyle(
-                            fontSize: 20, fontWeight: FontWeight.w800)),
+                            fontSize: 22, fontWeight: FontWeight.w800)),
                   ],
                 ),
               ],
             ),
             const SizedBox(height: 20),
-            const Text('Zamówienie się przygotowuje',
-                style: TextStyle(
-                    fontSize: 20, fontWeight: FontWeight.w800)),
-            const SizedBox(height: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 14, vertical: 8),
+              decoration: BoxDecoration(
+                color: glovoYellow.withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.update_rounded,
+                      color: glovoYellow, size: 16),
+                  const SizedBox(width: 6),
+                  Text(phaseStr,
+                      style: const TextStyle(
+                          color: glovoYellow,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 13)),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
             Text(o.partner,
                 style: const TextStyle(
-                    fontSize: 16, fontWeight: FontWeight.w600)),
+                    fontSize: 18, fontWeight: FontWeight.w800)),
             Text(o.partnerAddress,
                 style: const TextStyle(color: glovoMuted, fontSize: 13)),
+            if (queuePos > 0) ...[
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: glovoCard,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.people_outline_rounded,
+                        color: glovoMuted, size: 14),
+                    const SizedBox(width: 4),
+                    Text('W kolejce: $queuePos przed Tobą',
+                        style: const TextStyle(
+                            color: glovoMuted, fontSize: 12)),
+                  ],
+                ),
+              ),
+            ],
+            const SizedBox(height: 12),
+            // Mini progress timeline
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(4, (i) {
+                final reached = (fraction * 4).floor() > i;
+                final current = (fraction * 4).floor() == i;
+                return Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 4),
+                  width: 50,
+                  height: 6,
+                  decoration: BoxDecoration(
+                    color: reached
+                        ? glovoYellow
+                        : current
+                            ? glovoYellow.withValues(alpha: 0.4)
+                            : glovoCardLight,
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                );
+              }),
+            ),
           ],
         ),
       ),
     );
   }
 
+  String _prepPhaseLabel(double fraction) {
+    if (fraction < 0.25) return 'W kolejce';
+    if (fraction < 0.50) return 'Przyjęte przez restaurację';
+    if (fraction < 0.75) return 'Gotowanie zamówienia';
+    if (fraction < 1.0) return 'Pakowanie';
+    return 'Gotowe do odbioru';
+  }
+
+  int _prepQueuePos(double fraction) {
+    if (fraction >= 0.25) return 0;
+    return 3 - (fraction * 12).floor().clamp(0, 3);
+  }
+
   Widget _pickupCodeView() {
     final o = _currentOrder!;
+    final shakeOffset = _codeShake ? (_rng.nextInt(8) - 4).toDouble() : 0.0;
     return Padding(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisAlignment: MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text('Pokaż kod obsłudze',
+          const Text('Wpisz kod podany przez obsługę',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
-          const SizedBox(height: 4),
+              style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 2),
           Text('${o.partner} · ${o.partnerAddress}',
               textAlign: TextAlign.center,
-              style: const TextStyle(color: glovoMuted, fontSize: 13)),
-          const SizedBox(height: 24),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: o.pickupCode.split('').map((d) => Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 6),
-                  width: 56,
-                  height: 72,
-                  decoration: BoxDecoration(
-                    color: glovoYellow,
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  alignment: Alignment.center,
-                  child: Text(d,
-                      style: const TextStyle(
-                          color: glovoDark,
-                          fontSize: 36,
-                          fontWeight: FontWeight.w900)),
-                )).toList(),
-          ),
-          const SizedBox(height: 24),
+              style: const TextStyle(color: glovoMuted, fontSize: 12)),
+          const SizedBox(height: 8),
           Container(
-            padding: const EdgeInsets.all(14),
+            margin: const EdgeInsets.symmetric(horizontal: 24),
+            padding: const EdgeInsets.symmetric(
+                horizontal: 10, vertical: 6),
             decoration: BoxDecoration(
-              color: glovoCard,
-              borderRadius: BorderRadius.circular(14),
+              color: glovoCardLight,
+              borderRadius: BorderRadius.circular(12),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                const Text('Sprawdź zawartość:',
-                    style:
-                        TextStyle(color: glovoMuted, fontSize: 12)),
-                const SizedBox(height: 6),
-                Text(
-                  o.items.map((e) => '✓ $e').join('\n'),
-                  style: const TextStyle(fontSize: 14, height: 1.5),
-                ),
+                const Icon(Icons.lock_outline_rounded,
+                    color: glovoMuted, size: 14),
+                const SizedBox(width: 4),
+                Text('Kod od restauracji: ${o.pickupCode}',
+                    style: const TextStyle(
+                        color: glovoMuted, fontSize: 11)),
               ],
             ),
           ),
+          const SizedBox(height: 14),
+          Transform.translate(
+            offset: Offset(shakeOffset, 0),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(4, (i) {
+                final filled = i < _enteredCode.length;
+                return Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 6),
+                  width: 56,
+                  height: 70,
+                  decoration: BoxDecoration(
+                    color: _codeShake
+                        ? glovoRed
+                        : filled
+                            ? glovoYellow
+                            : glovoCard,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: _codeShake
+                          ? glovoRed
+                          : filled
+                              ? glovoYellow
+                              : glovoCardLight,
+                      width: 2,
+                    ),
+                  ),
+                  alignment: Alignment.center,
+                  child: Text(
+                      filled ? _enteredCode[i] : '',
+                      style: TextStyle(
+                          color: _codeShake
+                              ? Colors.white
+                              : filled
+                                  ? glovoDark
+                                  : glovoMuted,
+                          fontSize: 32,
+                          fontWeight: FontWeight.w900)),
+                );
+              }),
+            ),
+          ),
+          if (_wrongCodeAttempts > 0)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Center(
+                child: Text('Niepoprawnie ($_wrongCodeAttempts)',
+                    style: const TextStyle(
+                        color: glovoRed,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700)),
+              ),
+            ),
+          const SizedBox(height: 14),
+          Expanded(child: _buildKeypad()),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildKeypad() {
+    Widget key(String label, {VoidCallback? onTap, IconData? icon, Color? color}) {
+      return Expanded(
+        child: Padding(
+          padding: const EdgeInsets.all(4),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(14),
+            onTap: onTap,
+            child: Container(
+              decoration: BoxDecoration(
+                color: color ?? glovoCard,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              alignment: Alignment.center,
+              child: icon != null
+                  ? Icon(icon, color: glovoMuted, size: 26)
+                  : Text(label,
+                      style: const TextStyle(
+                          fontSize: 26, fontWeight: FontWeight.w800)),
+            ),
+          ),
+        ),
+      );
+    }
+
+    Widget row(List<Widget> children) =>
+        Expanded(child: Row(children: children));
+
+    return Column(
+      children: [
+        row([
+          key('1', onTap: () => _typeKey('1')),
+          key('2', onTap: () => _typeKey('2')),
+          key('3', onTap: () => _typeKey('3')),
+        ]),
+        row([
+          key('4', onTap: () => _typeKey('4')),
+          key('5', onTap: () => _typeKey('5')),
+          key('6', onTap: () => _typeKey('6')),
+        ]),
+        row([
+          key('7', onTap: () => _typeKey('7')),
+          key('8', onTap: () => _typeKey('8')),
+          key('9', onTap: () => _typeKey('9')),
+        ]),
+        row([
+          key('', onTap: null, color: Colors.transparent),
+          key('0', onTap: () => _typeKey('0')),
+          key('',
+              icon: Icons.backspace_outlined, onTap: _backspaceKey),
+        ]),
+      ],
+    );
+  }
+
+  Widget _itemsCheckView() {
+    final o = _currentOrder!;
+    final allChecked = _itemsChecked.length == o.items.length;
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text('Sprawdź i odznacz każdy produkt',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 4),
+          Text('${o.partner}',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: glovoMuted, fontSize: 12)),
+          const SizedBox(height: 14),
+          Container(
+            padding: const EdgeInsets.symmetric(
+                horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: glovoYellow.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.check_circle_outline_rounded,
+                    color: glovoYellow, size: 16),
+                const SizedBox(width: 6),
+                Text(
+                    'Sprawdzono ${_itemsChecked.length}/${o.items.length}',
+                    style: const TextStyle(
+                        color: glovoYellow,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12)),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          Expanded(
+            child: ListView.builder(
+              itemCount: o.items.length,
+              itemBuilder: (_, idx) {
+                final item = o.items[idx];
+                final checked = _itemsChecked.contains(idx);
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: InkWell(
+                    onTap: () => _toggleItem(idx),
+                    borderRadius: BorderRadius.circular(14),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: checked
+                            ? glovoGreen.withValues(alpha: 0.15)
+                            : glovoCard,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: checked
+                              ? glovoGreen
+                              : Colors.transparent,
+                          width: 1.5,
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            width: 28,
+                            height: 28,
+                            decoration: BoxDecoration(
+                              color: checked
+                                  ? glovoGreen
+                                  : Colors.transparent,
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: checked
+                                    ? glovoGreen
+                                    : glovoMuted,
+                                width: 2,
+                              ),
+                            ),
+                            child: checked
+                                ? const Icon(Icons.check_rounded,
+                                    color: Colors.white, size: 18)
+                                : null,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(item,
+                                style: TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w600,
+                                    decoration: checked
+                                        ? TextDecoration.lineThrough
+                                        : null,
+                                    color: checked
+                                        ? glovoMuted
+                                        : Colors.white)),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          if (allChecked)
+            Container(
+              margin: const EdgeInsets.only(top: 4),
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: glovoGreen.withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.local_offer_rounded,
+                      color: glovoGreen, size: 14),
+                  SizedBox(width: 6),
+                  Text('Torba zapieczętowana — gotowe do dostawy',
+                      style: TextStyle(
+                          color: glovoGreen,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700)),
+                ],
+              ),
+            ),
         ],
       ),
     );
@@ -4716,30 +5367,190 @@ class _CourierHomeState extends State<CourierHome>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Container(
-              width: 120,
-              height: 120,
-              decoration: BoxDecoration(
-                color: glovoGreen.withValues(alpha: 0.15),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.home_rounded,
-                  size: 60, color: glovoGreen),
+            // Door icon with knocking animation
+            AnimatedBuilder(
+              animation: _pulseCtrl,
+              builder: (_, _) {
+                final knocking = _customerPhase == 0;
+                final scale = knocking
+                    ? (1.0 + 0.05 * sin(_pulseCtrl.value * 6.28 * 4))
+                    : 1.0;
+                return Transform.scale(
+                  scale: scale,
+                  child: Container(
+                    width: 130,
+                    height: 130,
+                    decoration: BoxDecoration(
+                      color: _customerPhase == 1
+                          ? glovoGreen.withValues(alpha: 0.18)
+                          : _customerPhase == 3
+                              ? glovoBlue.withValues(alpha: 0.18)
+                              : glovoYellow.withValues(alpha: 0.15),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                        _customerPhase == 1
+                            ? Icons.sentiment_very_satisfied_rounded
+                            : _customerPhase == 3
+                                ? Icons.door_front_door_outlined
+                                : Icons.front_hand_rounded,
+                        size: 70,
+                        color: _customerPhase == 1
+                            ? glovoGreen
+                            : _customerPhase == 3
+                                ? glovoBlue
+                                : glovoYellow),
+                  ),
+                );
+              },
             ),
             const SizedBox(height: 16),
-            const Text('Jesteś u klienta',
-                style: TextStyle(
-                    fontSize: 22, fontWeight: FontWeight.w800)),
+            Text(
+              _customerPhase == 0
+                  ? 'Pukam do drzwi…'
+                  : _customerPhase == 1
+                      ? 'Klient otworzył'
+                      : 'Zostaw pod drzwiami',
+              style: const TextStyle(
+                  fontSize: 22, fontWeight: FontWeight.w800),
+            ),
             const SizedBox(height: 6),
             Text(o.customer,
                 style: const TextStyle(
                     fontSize: 18, fontWeight: FontWeight.w600)),
             Text(o.customerAddress,
                 style: const TextStyle(color: glovoMuted, fontSize: 14)),
-            const SizedBox(height: 18),
+            const SizedBox(height: 14),
+            if (_customerPhase == 0) ...[
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(
+                  3,
+                  (i) => Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: Container(
+                      width: 12,
+                      height: 12,
+                      decoration: BoxDecoration(
+                        color: i < _knockCount
+                            ? glovoYellow
+                            : glovoCardLight,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text('puk-puk-puk',
+                  style: TextStyle(color: glovoMuted, fontSize: 12)),
+            ],
+            if (_customerPhase == 1) ...[
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: glovoGreen.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.handshake_rounded,
+                        color: glovoGreen, size: 16),
+                    SizedBox(width: 6),
+                    Text('Wręcz zamówienie do ręki',
+                        style: TextStyle(
+                            color: glovoGreen,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 12)),
+                  ],
+                ),
+              ),
+            ],
+            if (_customerPhase == 3) ...[
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: glovoBlue.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.info_outline,
+                        size: 14, color: glovoBlue),
+                    SizedBox(width: 6),
+                    Text('Klient prosi o pozostawienie pod drzwiami',
+                        style: TextStyle(color: glovoBlue, fontSize: 12)),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _customerCallingView() {
+    final o = _currentOrder!;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            AnimatedBuilder(
+              animation: _pulseCtrl,
+              builder: (_, _) {
+                final t = _pulseCtrl.value;
+                return Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    for (var i = 0; i < 3; i++)
+                      Opacity(
+                        opacity: (1 - ((t + i / 3) % 1.0)).clamp(0.0, 1.0),
+                        child: Container(
+                          width: 80 + 100 * ((t + i / 3) % 1.0),
+                          height: 80 + 100 * ((t + i / 3) % 1.0),
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: glovoBlue.withValues(alpha: 0.6),
+                              width: 2,
+                            ),
+                          ),
+                        ),
+                      ),
+                    Container(
+                      width: 80,
+                      height: 80,
+                      decoration: const BoxDecoration(
+                        color: glovoBlue,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.phone_in_talk_rounded,
+                          color: Colors.white, size: 40),
+                    ),
+                  ],
+                );
+              },
+            ),
+            const SizedBox(height: 24),
+            const Text('Dzwonię do klienta…',
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 4),
+            Text(o.customer,
+                style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: glovoMuted)),
+            const SizedBox(height: 14),
             Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 14, vertical: 8),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
                 color: glovoCard,
                 borderRadius: BorderRadius.circular(12),
@@ -4747,11 +5558,10 @@ class _CourierHomeState extends State<CourierHome>
               child: const Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.info_outline,
-                      size: 14, color: glovoMuted),
+                  Icon(Icons.access_time_rounded,
+                      color: glovoMuted, size: 14),
                   SizedBox(width: 6),
-                  Text(
-                      'Zostaw zamówienie pod drzwiami i potwierdź dostawę',
+                  Text('Oczekiwanie na odpowiedź…',
                       style: TextStyle(color: glovoMuted, fontSize: 12)),
                 ],
               ),
@@ -4982,9 +5792,26 @@ class _CourierHomeState extends State<CourierHome>
         );
       case CourierState.atRestaurantReady:
         return _bigButton(
-          label: 'Potwierdzam odbiór',
-          icon: Icons.shopping_bag_rounded,
-          onTap: _confirmPickup,
+          label: 'Wpisz kod żeby potwierdzić odbiór',
+          color: glovoCard,
+          textColor: glovoMuted,
+          border: true,
+          onTap: null,
+        );
+      case CourierState.itemsCheck:
+        final o = _currentOrder;
+        final all = o == null
+            ? false
+            : _itemsChecked.length == o.items.length;
+        return _bigButton(
+          label: all
+              ? 'Zapieczętuj torbę i ruszaj'
+              : 'Sprawdź wszystkie produkty',
+          icon: all ? Icons.local_shipping_rounded : null,
+          color: all ? glovoYellow : glovoCard,
+          textColor: all ? glovoDark : glovoMuted,
+          border: !all,
+          onTap: all ? _confirmItemsAndDrive : null,
         );
       case CourierState.orderCancelled:
         return _bigButton(
@@ -4995,12 +5822,39 @@ class _CourierHomeState extends State<CourierHome>
           onTap: null,
         );
       case CourierState.atCustomer:
+        if (_customerPhase == 0) {
+          return _bigButton(
+            label: 'Pukam…',
+            color: glovoCard,
+            textColor: glovoMuted,
+            border: true,
+            onTap: null,
+          );
+        }
+        if (_customerPhase == 1) {
+          return _bigButton(
+            label: 'Wręczyłem zamówienie',
+            icon: Icons.handshake_rounded,
+            color: glovoGreen,
+            textColor: Colors.white,
+            onTap: _handOver,
+          );
+        }
+        // phase 3: leave at door — skip handover, go straight to photo
         return _bigButton(
-          label: 'Zostawiłem zamówienie',
-          icon: Icons.done_all_rounded,
-          color: glovoGreen,
+          label: 'Zostawiłem pod drzwiami',
+          icon: Icons.door_front_door_outlined,
+          color: glovoBlue,
           textColor: Colors.white,
           onTap: _handOver,
+        );
+      case CourierState.customerCalling:
+        return _bigButton(
+          label: 'Połączenie w toku…',
+          color: glovoCard,
+          textColor: glovoBlue,
+          border: true,
+          onTap: null,
         );
       case CourierState.takingPhoto:
         return _bigButton(
