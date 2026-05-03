@@ -268,6 +268,171 @@ const _gearCatalog = [
       'Krótszy czas oczekiwania w restauracji'),
 ];
 
+enum AchievementKind {
+  totalDeliveries,
+  totalNet,
+  fiveStarCount,
+  rainDeliveries,
+  peakDeliveries,
+  bigTipReceived,
+  reachLevel,
+  allCategories,
+  ownAllGear,
+  fiveStarStreak,
+  loginStreak,
+}
+
+class Achievement {
+  final String id;
+  final String title;
+  final String desc;
+  final IconData icon;
+  final double reward;
+  final AchievementKind kind;
+  final int threshold;
+
+  const Achievement({
+    required this.id,
+    required this.title,
+    required this.desc,
+    required this.icon,
+    required this.reward,
+    required this.kind,
+    required this.threshold,
+  });
+}
+
+const _achievements = [
+  Achievement(
+      id: 'first_delivery',
+      title: 'Pierwszy raz',
+      desc: 'Wykonaj pierwszą dostawę',
+      icon: Icons.celebration_rounded,
+      reward: 5,
+      kind: AchievementKind.totalDeliveries,
+      threshold: 1),
+  Achievement(
+      id: 'ten_deliveries',
+      title: 'Dziesiątka',
+      desc: 'Wykonaj 10 dostaw',
+      icon: Icons.looks_two_rounded,
+      reward: 10,
+      kind: AchievementKind.totalDeliveries,
+      threshold: 10),
+  Achievement(
+      id: 'fifty_deliveries',
+      title: 'Półsetka',
+      desc: 'Wykonaj 50 dostaw',
+      icon: Icons.local_shipping_rounded,
+      reward: 35,
+      kind: AchievementKind.totalDeliveries,
+      threshold: 50),
+  Achievement(
+      id: 'hundred_deliveries',
+      title: 'Setka',
+      desc: 'Wykonaj 100 dostaw',
+      icon: Icons.emoji_events_rounded,
+      reward: 100,
+      kind: AchievementKind.totalDeliveries,
+      threshold: 100),
+  Achievement(
+      id: 'first_500',
+      title: 'Pierwsze 500',
+      desc: 'Zarób 500 zł netto łącznie',
+      icon: Icons.payments_rounded,
+      reward: 50,
+      kind: AchievementKind.totalNet,
+      threshold: 500),
+  Achievement(
+      id: 'first_5star',
+      title: 'Idealny',
+      desc: 'Pierwsza ocena 5★',
+      icon: Icons.star_rounded,
+      reward: 3,
+      kind: AchievementKind.fiveStarCount,
+      threshold: 1),
+  Achievement(
+      id: 'master_5star',
+      title: 'Mistrz 5★',
+      desc: 'Zdobądź 25 ocen 5★',
+      icon: Icons.workspace_premium_rounded,
+      reward: 30,
+      kind: AchievementKind.fiveStarCount,
+      threshold: 25),
+  Achievement(
+      id: 'streak_5star',
+      title: 'Bezbłędny',
+      desc: '5 ocen 5★ z rzędu',
+      icon: Icons.auto_awesome_rounded,
+      reward: 25,
+      kind: AchievementKind.fiveStarStreak,
+      threshold: 5),
+  Achievement(
+      id: 'rain_warrior',
+      title: 'Mokry kurier',
+      desc: '10 dostaw w deszczu',
+      icon: Icons.umbrella_rounded,
+      reward: 20,
+      kind: AchievementKind.rainDeliveries,
+      threshold: 10),
+  Achievement(
+      id: 'peak_hunter',
+      title: 'Łowca peak',
+      desc: '20 dostaw w peak',
+      icon: Icons.local_fire_department_rounded,
+      reward: 35,
+      kind: AchievementKind.peakDeliveries,
+      threshold: 20),
+  Achievement(
+      id: 'big_tipper',
+      title: 'Hojny klient',
+      desc: 'Otrzymaj napiwek 15+ zł',
+      icon: Icons.savings_rounded,
+      reward: 15,
+      kind: AchievementKind.bigTipReceived,
+      threshold: 15),
+  Achievement(
+      id: 'all_categories',
+      title: 'Wszechstronny',
+      desc: 'Dostaw z każdej kategorii',
+      icon: Icons.category_rounded,
+      reward: 20,
+      kind: AchievementKind.allCategories,
+      threshold: 4),
+  Achievement(
+      id: 'lvl_5',
+      title: 'Doświadczony',
+      desc: 'Osiągnij poziom 5',
+      icon: Icons.military_tech_rounded,
+      reward: 30,
+      kind: AchievementKind.reachLevel,
+      threshold: 5),
+  Achievement(
+      id: 'lvl_10',
+      title: 'Weteran',
+      desc: 'Osiągnij poziom 10',
+      icon: Icons.shield_rounded,
+      reward: 75,
+      kind: AchievementKind.reachLevel,
+      threshold: 10),
+  Achievement(
+      id: 'full_kit',
+      title: 'Pełne wyposażenie',
+      desc: 'Kup całe wyposażenie',
+      icon: Icons.shopping_basket_rounded,
+      reward: 100,
+      kind: AchievementKind.ownAllGear,
+      threshold: 6),
+  Achievement(
+      id: 'streak_7',
+      title: 'Tydzień nieobecności rynkowej',
+      desc: 'Loguj się przez 7 dni z rzędu',
+      icon: Icons.calendar_view_week_rounded,
+      reward: 35,
+      kind: AchievementKind.loginStreak,
+      threshold: 7),
+];
+
 class WeeklyChallenge {
   final String title;
   final IconData icon;
@@ -386,6 +551,26 @@ class _CourierHomeState extends State<CourierHome>
   WeeklyChallenge? _weekly;
   bool _loaded = false;
   SharedPreferences? _prefs;
+
+  // Achievements
+  final Set<String> _unlockedAchievements = {};
+  int _fiveStarTotal = 0;
+  int _fiveStarStreak = 0;
+  int _rainDeliveries = 0;
+  int _peakDeliveries = 0;
+  double _maxTipReceived = 0;
+  final Set<OrderCategory> _categoriesDelivered = {};
+
+  // Daily login streak
+  String? _lastLoginDate;
+  int _loginStreak = 0;
+
+  // Stacked orders
+  Order? _stackedOrder;
+  int _stackOfferCountdown = 0;
+  Timer? _stackOfferTimer;
+  bool _stackOfferActive = false;
+  Order? _pendingStackOffer;
 
   final List<CompletedDelivery> _history = [];
   late List<Goal> _goals;
@@ -515,6 +700,22 @@ class _CourierHomeState extends State<CourierHome>
         );
       }
       _ownedGear.addAll(p.getStringList('gear') ?? []);
+      _unlockedAchievements.addAll(p.getStringList('achievements') ?? []);
+      _fiveStarTotal = p.getInt('fiveStarTotal') ?? 0;
+      _fiveStarStreak = p.getInt('fiveStarStreak') ?? 0;
+      _rainDeliveries = p.getInt('rainDeliveries') ?? 0;
+      _peakDeliveries = p.getInt('peakDeliveries') ?? 0;
+      _maxTipReceived = p.getDouble('maxTipReceived') ?? 0;
+      final cats = p.getStringList('catsDelivered') ?? [];
+      for (final c in cats) {
+        final cat = OrderCategory.values.firstWhere(
+          (x) => x.name == c,
+          orElse: () => OrderCategory.food,
+        );
+        _categoriesDelivered.add(cat);
+      }
+      _lastLoginDate = p.getString('lastLoginDate');
+      _loginStreak = p.getInt('loginStreak') ?? 0;
 
       final weeklyJson = p.getString('weekly');
       if (weeklyJson != null) {
@@ -534,6 +735,7 @@ class _CourierHomeState extends State<CourierHome>
 
       _loaded = true;
     });
+    if (_name != null) _checkDailyLogin();
   }
 
   Future<void> _saveState() async {
@@ -554,6 +756,18 @@ class _CourierHomeState extends State<CourierHome>
     await p.setString('vehicle', _vehicle.name);
     await p.setString('zone', _zone.name);
     await p.setStringList('gear', _ownedGear.toList());
+    await p.setStringList('achievements', _unlockedAchievements.toList());
+    await p.setInt('fiveStarTotal', _fiveStarTotal);
+    await p.setInt('fiveStarStreak', _fiveStarStreak);
+    await p.setInt('rainDeliveries', _rainDeliveries);
+    await p.setInt('peakDeliveries', _peakDeliveries);
+    await p.setDouble('maxTipReceived', _maxTipReceived);
+    await p.setStringList('catsDelivered',
+        _categoriesDelivered.map((c) => c.name).toList());
+    if (_lastLoginDate != null) {
+      await p.setString('lastLoginDate', _lastLoginDate!);
+    }
+    await p.setInt('loginStreak', _loginStreak);
     if (_weekly != null) {
       await p.setString('weekly', jsonEncode(_weekly!.toJson()));
     }
@@ -576,7 +790,19 @@ class _CourierHomeState extends State<CourierHome>
       _rating = 4.92;
       _onlineSeconds = 0;
       _ownedGear.clear();
+      _unlockedAchievements.clear();
+      _categoriesDelivered.clear();
+      _fiveStarTotal = 0;
+      _fiveStarStreak = 0;
+      _rainDeliveries = 0;
+      _peakDeliveries = 0;
+      _maxTipReceived = 0;
+      _lastLoginDate = null;
+      _loginStreak = 0;
       _history.clear();
+      _stackedOrder = null;
+      _pendingStackOffer = null;
+      _stackOfferActive = false;
       _zone = Zone.centrum;
       _vehicle = Vehicle.scooter;
       _weekly = WeeklyChallenge.fresh(_rng);
@@ -614,6 +840,7 @@ class _CourierHomeState extends State<CourierHome>
     _progressTimer?.cancel();
     _prepTimer?.cancel();
     _eventBannerTimer?.cancel();
+    _stackOfferTimer?.cancel();
     super.dispose();
   }
 
@@ -925,6 +1152,8 @@ class _CourierHomeState extends State<CourierHome>
       _state = CourierState.orderIncoming;
       _orderCountdown = 15;
     });
+    HapticFeedback.heavyImpact();
+    SystemSound.play(SystemSoundType.alert);
 
     _orderTimer = Timer.periodic(const Duration(seconds: 1), (t) {
       if (!mounted) return;
@@ -942,6 +1171,7 @@ class _CourierHomeState extends State<CourierHome>
 
   void _acceptOrder() {
     _orderTimer?.cancel();
+    HapticFeedback.mediumImpact();
     setState(() {
       _state = CourierState.toRestaurant;
       _routeProgress = 0;
@@ -1006,6 +1236,7 @@ class _CourierHomeState extends State<CourierHome>
   }
 
   void _confirmPickup() {
+    HapticFeedback.mediumImpact();
     setState(() {
       _state = CourierState.toCustomer;
       _routeProgress = 0;
@@ -1097,6 +1328,16 @@ class _CourierHomeState extends State<CourierHome>
       if (_history.length > 50) _history.removeLast();
       if (o.tip > _bestTip) _bestTip = o.tip;
       if (net > _bestNet) _bestNet = net;
+      if (o.tip > _maxTipReceived) _maxTipReceived = o.tip;
+      if (o.weatherAtPickup.isRainy) _rainDeliveries++;
+      if (o.surge >= 1.4) _peakDeliveries++;
+      _categoriesDelivered.add(o.category);
+      if (o.customerStars == 5) {
+        _fiveStarTotal++;
+        _fiveStarStreak++;
+      } else {
+        _fiveStarStreak = 0;
+      }
       _xp += xpGain;
       while (_xp >= _xpPerLevel) {
         _xp -= _xpPerLevel;
@@ -1107,11 +1348,28 @@ class _CourierHomeState extends State<CourierHome>
 
     if (_level > levelBefore) {
       _showEventBanner('Awans! Poziom $_level', glovoYellow);
+      HapticFeedback.heavyImpact();
     }
+    HapticFeedback.heavyImpact();
+    SystemSound.play(SystemSoundType.click);
+    _checkAchievements();
     _saveState();
 
     Timer(const Duration(milliseconds: 3500), () {
       if (!mounted) return;
+      // If a stacked order was accepted, continue with it
+      if (_stackedOrder != null) {
+        final stacked = _stackedOrder!;
+        setState(() {
+          _currentOrder = stacked;
+          _stackedOrder = null;
+          _state = CourierState.toRestaurant;
+          _routeProgress = 0;
+        });
+        _showEventBanner('Następna dostawa: ${stacked.partner}', glovoOrange);
+        _runRoute(onComplete: _onArriveAtRestaurant);
+        return;
+      }
       setState(() {
         _currentOrder = null;
         _state = CourierState.searching;
@@ -1164,6 +1422,8 @@ class _CourierHomeState extends State<CourierHome>
     });
     _showEventBanner(
         'Weekly ukończone! +${w.reward.toStringAsFixed(2)} zł', glovoYellow);
+    HapticFeedback.heavyImpact();
+    _checkAchievements();
     Timer(const Duration(milliseconds: 1500), () {
       if (!mounted) return;
       setState(() => _weekly = WeeklyChallenge.fresh(_rng));
@@ -1184,6 +1444,8 @@ class _CourierHomeState extends State<CourierHome>
       _gross -= item.price.toDouble();
     });
     _showEventBanner('Zakupiono: ${item.name}', glovoGreen);
+    HapticFeedback.mediumImpact();
+    _checkAchievements();
     _saveState();
   }
 
@@ -1198,6 +1460,267 @@ class _CourierHomeState extends State<CourierHome>
     _saveState();
   }
 
+  // ===== DAILY LOGIN STREAK =====
+  void _checkDailyLogin() {
+    final now = DateTime.now();
+    final today = '${now.year.toString().padLeft(4, '0')}-'
+        '${now.month.toString().padLeft(2, '0')}-'
+        '${now.day.toString().padLeft(2, '0')}';
+    if (_lastLoginDate == today) return;
+
+    int newStreak;
+    if (_lastLoginDate == null) {
+      newStreak = 1;
+    } else {
+      try {
+        final prev = DateTime.parse(_lastLoginDate!);
+        final daysDiff =
+            DateTime(now.year, now.month, now.day).difference(
+                    DateTime(prev.year, prev.month, prev.day))
+                .inDays;
+        if (daysDiff == 1) {
+          newStreak = _loginStreak + 1;
+        } else {
+          newStreak = 1;
+        }
+      } catch (_) {
+        newStreak = 1;
+      }
+    }
+
+    final bonus = (5.0 * newStreak).clamp(5.0, 50.0).toDouble();
+    setState(() {
+      _loginStreak = newStreak;
+      _lastLoginDate = today;
+      _gross += bonus;
+    });
+    _saveState();
+    _checkAchievements();
+
+    Timer(const Duration(milliseconds: 600), () {
+      if (!mounted) return;
+      _showLoginBonusDialog(newStreak, bonus);
+    });
+  }
+
+  void _showLoginBonusDialog(int streak, double bonus) {
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: glovoCard,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20)),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.local_fire_department_rounded,
+                  color: glovoOrange, size: 60),
+              const SizedBox(height: 8),
+              Text('$streak ${streak == 1 ? "dzień" : "dni"} z rzędu',
+                  style: const TextStyle(
+                      fontSize: 22, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 4),
+              Text('+ ${bonus.toStringAsFixed(2)} zł bonusu',
+                  style: const TextStyle(
+                      color: glovoGreen,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800)),
+              const SizedBox(height: 8),
+              const Text('Zaglądaj codziennie po większy bonus!',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: glovoMuted, fontSize: 12)),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: glovoYellow,
+                    foregroundColor: glovoDark,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  child: const Text('Świetnie!',
+                      style: TextStyle(
+                          fontWeight: FontWeight.w800, fontSize: 15)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    HapticFeedback.heavyImpact();
+  }
+
+  // ===== ACHIEVEMENTS =====
+  void _checkAchievements() {
+    for (final a in _achievements) {
+      if (_unlockedAchievements.contains(a.id)) continue;
+      bool unlocked = false;
+      switch (a.kind) {
+        case AchievementKind.totalDeliveries:
+          unlocked = _completed >= a.threshold;
+        case AchievementKind.totalNet:
+          unlocked = (_gross - _fuelCost) >= a.threshold;
+        case AchievementKind.fiveStarCount:
+          unlocked = _fiveStarTotal >= a.threshold;
+        case AchievementKind.rainDeliveries:
+          unlocked = _rainDeliveries >= a.threshold;
+        case AchievementKind.peakDeliveries:
+          unlocked = _peakDeliveries >= a.threshold;
+        case AchievementKind.bigTipReceived:
+          unlocked = _maxTipReceived >= a.threshold;
+        case AchievementKind.reachLevel:
+          unlocked = _level >= a.threshold;
+        case AchievementKind.allCategories:
+          unlocked = _categoriesDelivered.length >= a.threshold;
+        case AchievementKind.ownAllGear:
+          unlocked = _ownedGear.length >= a.threshold;
+        case AchievementKind.fiveStarStreak:
+          unlocked = _fiveStarStreak >= a.threshold;
+        case AchievementKind.loginStreak:
+          unlocked = _loginStreak >= a.threshold;
+      }
+      if (unlocked) _unlockAchievement(a);
+    }
+  }
+
+  void _unlockAchievement(Achievement a) {
+    setState(() {
+      _unlockedAchievements.add(a.id);
+      _gross += a.reward;
+    });
+    _showEventBanner('🏆 ${a.title}: +${a.reward.toStringAsFixed(0)} zł',
+        glovoYellow);
+    HapticFeedback.heavyImpact();
+    _saveState();
+  }
+
+  // ===== STACKED ORDERS =====
+  Order _generateOrderForStack() {
+    final categories = [
+      OrderCategory.food, OrderCategory.food, OrderCategory.food,
+      OrderCategory.grocery, OrderCategory.grocery,
+      OrderCategory.pharmacy, OrderCategory.anything,
+    ];
+    final cat = categories[_rng.nextInt(categories.length)];
+    late (String, String) partner;
+    late List<String> pool;
+    int itemCountMax;
+    switch (cat) {
+      case OrderCategory.food:
+        partner = _foodPartners[_rng.nextInt(_foodPartners.length)];
+        pool = _foodItems;
+        itemCountMax = 3;
+      case OrderCategory.grocery:
+        partner = _groceryPartners[_rng.nextInt(_groceryPartners.length)];
+        pool = _groceryItems;
+        itemCountMax = 5;
+      case OrderCategory.pharmacy:
+        partner = _pharmacyPartners[_rng.nextInt(_pharmacyPartners.length)];
+        pool = _pharmacyItems;
+        itemCountMax = 2;
+      case OrderCategory.anything:
+        partner = _anythingPartners[_rng.nextInt(_anythingPartners.length)];
+        pool = _anythingItems;
+        itemCountMax = 1;
+    }
+    final c = _customers[_rng.nextInt(_customers.length)];
+    final itemsCount = 1 + _rng.nextInt(itemCountMax);
+    final items = <String>[];
+    for (var i = 0; i < itemsCount; i++) {
+      items.add(pool[_rng.nextInt(pool.length)]);
+    }
+    final dist = 0.5 + _rng.nextDouble() * 2.0; // shorter, stacked nearby
+    var basePay = 4.0 + dist * 2.10 + _rng.nextDouble() * 1.5;
+    basePay *= 1.20; // stacked bonus
+    basePay *= _zone.payoutMul;
+    if (_ownedGear.contains('rack')) basePay += 1.0;
+    if (_weather.isRainy && _ownedGear.contains('raincoat')) {
+      basePay *= 1.10;
+    }
+    final code = (1000 + _rng.nextInt(8999)).toString();
+    var prep = cat == OrderCategory.food
+        ? 3 + _rng.nextInt(5)
+        : cat == OrderCategory.grocery
+            ? 2 + _rng.nextInt(4)
+            : 2 + _rng.nextInt(3);
+    if (_ownedGear.contains('vip')) prep = (prep * 0.7).ceil();
+
+    return Order(
+      category: cat,
+      partner: partner.$1,
+      partnerAddress: 'ul. ${partner.$2}',
+      customer: c.$1,
+      customerAddress: 'ul. ${c.$2}',
+      items: items,
+      distanceKm: double.parse(dist.toStringAsFixed(1)),
+      basePay: double.parse(basePay.toStringAsFixed(2)),
+      surge: _surgeMultiplier,
+      weatherAtPickup: _weather,
+      pickupCode: code,
+      prepSeconds: prep,
+      willCancel: false,
+    );
+  }
+
+  void _maybeOfferStack() {
+    if (_pendingStackOffer != null) return;
+    if (_stackedOrder != null) return;
+    if (_state != CourierState.toCustomer) return;
+    if (_completed < 1) return; // first delivery: no stack
+    if (_rng.nextDouble() > 0.22) return;
+
+    final stackOrder = _generateOrderForStack();
+    setState(() {
+      _pendingStackOffer = stackOrder;
+      _stackOfferActive = true;
+      _stackOfferCountdown = 8;
+    });
+    HapticFeedback.mediumImpact();
+    _stackOfferTimer?.cancel();
+    _stackOfferTimer = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
+      setState(() => _stackOfferCountdown--);
+      if (_stackOfferCountdown <= 0) {
+        t.cancel();
+        _declineStack();
+      }
+    });
+  }
+
+  void _acceptStack() {
+    final o = _pendingStackOffer;
+    if (o == null) return;
+    _stackOfferTimer?.cancel();
+    setState(() {
+      _stackedOrder = o;
+      _pendingStackOffer = null;
+      _stackOfferActive = false;
+    });
+    _showEventBanner(
+        'Stackuje: ${o.partner} → ${o.customer} (+${o.basePay.toStringAsFixed(2)} zł)',
+        glovoOrange);
+    HapticFeedback.mediumImpact();
+  }
+
+  void _declineStack() {
+    _stackOfferTimer?.cancel();
+    setState(() {
+      _pendingStackOffer = null;
+      _stackOfferActive = false;
+    });
+  }
+
   void _claimGoal(Goal g) {
     if (!g.done || g.claimed) return;
     setState(() {
@@ -1206,6 +1729,8 @@ class _CourierHomeState extends State<CourierHome>
     });
     _showEventBanner('Cel ukończony! +${g.reward.toStringAsFixed(2)} zł',
         glovoGreen);
+    HapticFeedback.mediumImpact();
+    _checkAchievements();
     _saveState();
     if (_goals.every((x) => x.claimed)) {
       Timer(const Duration(milliseconds: 1500), () {
@@ -1244,6 +1769,13 @@ class _CourierHomeState extends State<CourierHome>
       if (!mounted) {
         t.cancel();
         return;
+      }
+      // Stacked-order offer chance (only on toCustomer leg)
+      if (_state == CourierState.toCustomer &&
+          step > totalSteps * 0.20 &&
+          step < totalSteps * 0.85 &&
+          step % 10 == 0) {
+        _maybeOfferStack();
       }
       // Random events during route (only after some progress)
       if (!trafficTriggered &&
@@ -1461,6 +1993,7 @@ class _CourierHomeState extends State<CourierHome>
                   _zone = pickedZone;
                 });
                 await _saveState();
+                _checkDailyLogin();
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: glovoYellow,
@@ -2326,6 +2859,66 @@ class _CourierHomeState extends State<CourierHome>
         ),
         const SizedBox(height: 18),
 
+        // ===== Login Streak =====
+        if (_loginStreak > 0) ...[
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  glovoOrange.withValues(alpha: 0.25),
+                  glovoCard,
+                ],
+              ),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                  color: glovoOrange.withValues(alpha: 0.4), width: 1),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.local_fire_department_rounded,
+                    color: glovoOrange, size: 32),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('$_loginStreak ${_loginStreak == 1 ? "dzień" : "dni"} z rzędu',
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 15)),
+                      const Text('Zaglądaj codziennie po większy bonus',
+                          style: TextStyle(
+                              color: glovoMuted, fontSize: 11)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 18),
+        ],
+
+        // ===== Achievements =====
+        Row(
+          children: [
+            const Icon(Icons.emoji_events_rounded,
+                color: glovoYellow, size: 18),
+            const SizedBox(width: 6),
+            Text(
+                'Odznaki (${_unlockedAchievements.length}/${_achievements.length})',
+                style: const TextStyle(
+                    fontSize: 16, fontWeight: FontWeight.w800)),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: _achievements.map(_achievementBadge).toList(),
+        ),
+        const SizedBox(height: 18),
+
         // ===== Weekly Challenge =====
         if (_weekly != null) ...[
           Row(
@@ -2385,6 +2978,101 @@ class _CourierHomeState extends State<CourierHome>
         ),
         const SizedBox(height: 80),
       ],
+    );
+  }
+
+  Widget _achievementBadge(Achievement a) {
+    final unlocked = _unlockedAchievements.contains(a.id);
+    return GestureDetector(
+      onTap: () => _showAchievementInfo(a, unlocked),
+      child: Container(
+        width: 78,
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
+        decoration: BoxDecoration(
+          color: unlocked
+              ? glovoYellow.withValues(alpha: 0.18)
+              : glovoCard,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: unlocked ? glovoYellow : glovoCardLight,
+            width: 1,
+          ),
+        ),
+        child: Column(
+          children: [
+            Icon(a.icon,
+                color: unlocked ? glovoYellow : glovoMuted, size: 28),
+            const SizedBox(height: 4),
+            Text(
+              a.title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                  color: unlocked ? Colors.white : glovoMuted,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  height: 1.1),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showAchievementInfo(Achievement a, bool unlocked) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: glovoCard,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                color: unlocked
+                    ? glovoYellow.withValues(alpha: 0.2)
+                    : glovoCardLight,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(a.icon,
+                  color: unlocked ? glovoYellow : glovoMuted, size: 44),
+            ),
+            const SizedBox(height: 14),
+            Text(a.title,
+                style: const TextStyle(
+                    fontWeight: FontWeight.w800, fontSize: 18)),
+            const SizedBox(height: 6),
+            Text(a.desc,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: glovoMuted, fontSize: 13)),
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 12, vertical: 5),
+              decoration: BoxDecoration(
+                color: glovoGreen.withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text('+${a.reward.toStringAsFixed(0)} zł',
+                  style: const TextStyle(
+                      color: glovoGreen,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 13)),
+            ),
+            const SizedBox(height: 8),
+            Text(unlocked ? 'Odblokowane ✓' : 'Zablokowane',
+                style: TextStyle(
+                    color: unlocked ? glovoGreen : glovoMuted,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12)),
+          ],
+        ),
+      ),
     );
   }
 
@@ -3031,7 +3719,9 @@ class _CourierHomeState extends State<CourierHome>
         goingToRestaurant ? o.partnerAddress : o.customerAddress;
     final remainingKm = o.distanceKm * (1 - _routeProgress);
     final etaMin = (remainingKm * 60 / _vehicle.speedKmh).ceil();
-    return Padding(
+    return Stack(
+      children: [
+        Padding(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -3126,6 +3816,125 @@ class _CourierHomeState extends State<CourierHome>
             ),
           ),
         ],
+      ),
+    ),
+        if (_stackOfferActive && _pendingStackOffer != null)
+          _buildStackOfferOverlay(_pendingStackOffer!),
+      ],
+    );
+  }
+
+  Widget _buildStackOfferOverlay(Order o) {
+    return Positioned(
+      top: 12,
+      left: 12,
+      right: 12,
+      child: Material(
+        color: Colors.transparent,
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [glovoOrange, glovoRed],
+            ),
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: glovoOrange.withValues(alpha: 0.4),
+                blurRadius: 16,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.bolt_rounded, color: Colors.white, size: 20),
+                  const SizedBox(width: 6),
+                  const Text('Stackuj kolejne zamówienie!',
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 14)),
+                  const Spacer(),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: Colors.black26,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text('${_stackOfferCountdown}s',
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 12)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Icon(o.category.icon, color: Colors.white, size: 16),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text('${o.partner} → ${o.customer}',
+                        style: const TextStyle(
+                            color: Colors.white, fontSize: 12)),
+                  ),
+                  Text(
+                      '+${o.basePay.toStringAsFixed(2)} zł',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 14)),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: _declineStack,
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: Colors.white70),
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                      child: const Text('Odrzuć',
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 12)),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    flex: 2,
+                    child: ElevatedButton(
+                      onPressed: _acceptStack,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.white,
+                        foregroundColor: glovoRed,
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                      child: const Text('Stackuj',
+                          style: TextStyle(
+                              fontWeight: FontWeight.w800, fontSize: 12)),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
