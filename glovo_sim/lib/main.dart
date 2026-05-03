@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() => runApp(const GlovoSimApp());
 
@@ -217,6 +219,112 @@ class Goal {
   }
 }
 
+enum Zone {
+  centrum('Centrum', Icons.location_city_rounded, 1.0, 1.0, 1.0, 1, glovoYellow,
+      'Zrównoważona strefa, dużo restauracji'),
+  mokotow('Mokotów', Icons.apartment_rounded, 0.85, 1.15, 1.10, 1, glovoBlue,
+      'Większe odległości, lepsze stawki'),
+  praga('Praga', Icons.holiday_village_rounded, 1.30, 0.85, 0.95, 1, glovoGreen,
+      'Dużo zamówień, mniejszy peak'),
+  wilanow('Wilanów', Icons.villa_rounded, 0.6, 1.30, 1.30, 5, glovoPurple,
+      'VIP — rzadko, ale duże napiwki'),
+  lotnisko('Lotnisko', Icons.flight_takeoff_rounded, 0.4, 1.50, 1.50, 10,
+      glovoOrange, 'Niska częstość, najwyższe stawki');
+
+  final String label;
+  final IconData icon;
+  final double demandMul;
+  final double payoutMul;
+  final double tipMul;
+  final int unlockLevel;
+  final Color color;
+  final String desc;
+
+  const Zone(this.label, this.icon, this.demandMul, this.payoutMul,
+      this.tipMul, this.unlockLevel, this.color, this.desc);
+}
+
+class GearItem {
+  final String id;
+  final String name;
+  final IconData icon;
+  final int price;
+  final String desc;
+  const GearItem(this.id, this.name, this.icon, this.price, this.desc);
+}
+
+const _gearCatalog = [
+  GearItem('thermo', 'Termo-torba', Icons.lunch_dining_rounded, 60,
+      'Klienci dają 5★ częściej (+8%)'),
+  GearItem('raincoat', 'Płaszcz', Icons.umbrella_rounded, 45,
+      'Dodatkowe +10% w deszczu'),
+  GearItem('rack', 'Lepszy bagażnik', Icons.backpack_rounded, 80,
+      '+1 zł bonusu za każdą dostawę'),
+  GearItem('gps', 'GPS premium', Icons.gps_fixed_rounded, 70,
+      '−15% czasu trasy'),
+  GearItem('phone', 'Powerbank XL', Icons.battery_charging_full_rounded, 30,
+      'Mniej korków na trasie'),
+  GearItem('vip', 'Karta VIP partnerów', Icons.workspace_premium_rounded, 120,
+      'Krótszy czas oczekiwania w restauracji'),
+];
+
+class WeeklyChallenge {
+  final String title;
+  final IconData icon;
+  final int target;
+  final double reward;
+  int progress;
+  bool claimed;
+
+  WeeklyChallenge({
+    required this.title,
+    required this.icon,
+    required this.target,
+    required this.reward,
+    this.progress = 0,
+    this.claimed = false,
+  });
+
+  bool get done => progress >= target;
+  double get fraction => (progress / target).clamp(0.0, 1.0);
+
+  Map<String, dynamic> toJson() => {
+        'title': title,
+        'iconCode': icon.codePoint,
+        'iconFamily': icon.fontFamily,
+        'target': target,
+        'reward': reward,
+        'progress': progress,
+        'claimed': claimed,
+      };
+
+  static WeeklyChallenge fresh(Random rng) {
+    final pool = [
+      WeeklyChallenge(
+          title: 'Wykonaj 25 dostaw',
+          icon: Icons.local_shipping_rounded,
+          target: 25,
+          reward: 60),
+      WeeklyChallenge(
+          title: 'Zarób 300 zł netto',
+          icon: Icons.payments_rounded,
+          target: 300,
+          reward: 75),
+      WeeklyChallenge(
+          title: 'Zdobądź 15 ocen 5★',
+          icon: Icons.star_rounded,
+          target: 15,
+          reward: 65),
+      WeeklyChallenge(
+          title: 'Dostaw 5x w deszczu',
+          icon: Icons.umbrella_rounded,
+          target: 5,
+          reward: 70),
+    ];
+    return pool[rng.nextInt(pool.length)];
+  }
+}
+
 enum CourierState {
   offline,
   searching,
@@ -271,6 +379,13 @@ class _CourierHomeState extends State<CourierHome>
   int _level = 1;
   int _xp = 0;
   static const int _xpPerLevel = 120;
+
+  String? _name;
+  Zone _zone = Zone.centrum;
+  final Set<String> _ownedGear = {};
+  WeeklyChallenge? _weekly;
+  bool _loaded = false;
+  SharedPreferences? _prefs;
 
   final List<CompletedDelivery> _history = [];
   late List<Goal> _goals;
@@ -366,6 +481,108 @@ class _CourierHomeState extends State<CourierHome>
       duration: const Duration(milliseconds: 800),
     )..repeat();
     _goals = _generateDailyGoals();
+    _loadState();
+  }
+
+  Future<void> _loadState() async {
+    final p = await SharedPreferences.getInstance();
+    _prefs = p;
+    setState(() {
+      _name = p.getString('name');
+      _level = p.getInt('level') ?? 1;
+      _xp = p.getInt('xp') ?? 0;
+      _completed = p.getInt('completed') ?? 0;
+      _rejected = p.getInt('rejected') ?? 0;
+      _cancelled = p.getInt('cancelled') ?? 0;
+      _gross = p.getDouble('gross') ?? 0;
+      _fuelCost = p.getDouble('fuelCost') ?? 0;
+      _bestTip = p.getDouble('bestTip') ?? 0;
+      _bestNet = p.getDouble('bestNet') ?? 0;
+      _rating = p.getDouble('rating') ?? 4.92;
+      _onlineSeconds = p.getInt('onlineSeconds') ?? 0;
+      final vehicleName = p.getString('vehicle');
+      if (vehicleName != null) {
+        _vehicle = Vehicle.values.firstWhere(
+          (v) => v.name == vehicleName,
+          orElse: () => Vehicle.scooter,
+        );
+      }
+      final zoneName = p.getString('zone');
+      if (zoneName != null) {
+        _zone = Zone.values.firstWhere(
+          (z) => z.name == zoneName,
+          orElse: () => Zone.centrum,
+        );
+      }
+      _ownedGear.addAll(p.getStringList('gear') ?? []);
+
+      final weeklyJson = p.getString('weekly');
+      if (weeklyJson != null) {
+        final m = jsonDecode(weeklyJson) as Map<String, dynamic>;
+        _weekly = WeeklyChallenge(
+          title: m['title'] as String,
+          icon: IconData(m['iconCode'] as int,
+              fontFamily: m['iconFamily'] as String?),
+          target: m['target'] as int,
+          reward: (m['reward'] as num).toDouble(),
+          progress: m['progress'] as int? ?? 0,
+          claimed: m['claimed'] as bool? ?? false,
+        );
+      } else {
+        _weekly = WeeklyChallenge.fresh(_rng);
+      }
+
+      _loaded = true;
+    });
+  }
+
+  Future<void> _saveState() async {
+    final p = _prefs;
+    if (p == null) return;
+    if (_name != null) await p.setString('name', _name!);
+    await p.setInt('level', _level);
+    await p.setInt('xp', _xp);
+    await p.setInt('completed', _completed);
+    await p.setInt('rejected', _rejected);
+    await p.setInt('cancelled', _cancelled);
+    await p.setDouble('gross', _gross);
+    await p.setDouble('fuelCost', _fuelCost);
+    await p.setDouble('bestTip', _bestTip);
+    await p.setDouble('bestNet', _bestNet);
+    await p.setDouble('rating', _rating);
+    await p.setInt('onlineSeconds', _onlineSeconds);
+    await p.setString('vehicle', _vehicle.name);
+    await p.setString('zone', _zone.name);
+    await p.setStringList('gear', _ownedGear.toList());
+    if (_weekly != null) {
+      await p.setString('weekly', jsonEncode(_weekly!.toJson()));
+    }
+  }
+
+  Future<void> _resetProgress() async {
+    final p = _prefs;
+    if (p != null) await p.clear();
+    setState(() {
+      _name = null;
+      _level = 1;
+      _xp = 0;
+      _completed = 0;
+      _rejected = 0;
+      _cancelled = 0;
+      _gross = 0;
+      _fuelCost = 0;
+      _bestTip = 0;
+      _bestNet = 0;
+      _rating = 4.92;
+      _onlineSeconds = 0;
+      _ownedGear.clear();
+      _history.clear();
+      _zone = Zone.centrum;
+      _vehicle = Vehicle.scooter;
+      _weekly = WeeklyChallenge.fresh(_rng);
+      _goals = _generateDailyGoals();
+      _tabIndex = 0;
+    });
   }
 
   List<Goal> _generateDailyGoals() {
@@ -426,16 +643,17 @@ class _CourierHomeState extends State<CourierHome>
 
   int _baseDelaySec() {
     final h = _simHour;
-    int base;
+    double base;
     if (h >= 11 && h < 14) base = 4;
     else if (h >= 18 && h < 22) base = 4;
     else if (h >= 14 && h < 17) base = 7;
     else if (h >= 22 || h < 7) base = 18;
     else if (h >= 7 && h < 11) base = 9;
     else base = 8;
-    if (_weather == Weather.rainy) base = (base * 0.75).round();
-    if (_weather == Weather.heavyRain) base = (base * 0.6).round();
-    return max(2, base);
+    if (_weather == Weather.rainy) base *= 0.75;
+    if (_weather == Weather.heavyRain) base *= 0.6;
+    base /= _zone.demandMul;
+    return max(2, base.round());
   }
 
   void _startSimClock() {
@@ -521,6 +739,7 @@ class _CourierHomeState extends State<CourierHome>
     if (shiftDeliveries > 0) {
       _showShiftSummary(shiftDeliveries, shiftNet, shiftSeconds);
     }
+    _saveState();
   }
 
   void _resetTimers() {
@@ -672,13 +891,19 @@ class _CourierHomeState extends State<CourierHome>
       items.add(pool[_rng.nextInt(pool.length)]);
     }
     final dist = 0.6 + _rng.nextDouble() * 3.4;
-    final basePay = 5.50 + dist * 2.10 + _rng.nextDouble() * 1.5;
+    var basePay = 5.50 + dist * 2.10 + _rng.nextDouble() * 1.5;
+    basePay *= _zone.payoutMul;
+    if (_ownedGear.contains('rack')) basePay += 1.0;
+    if (_weather.isRainy && _ownedGear.contains('raincoat')) {
+      basePay *= 1.10;
+    }
     final code = (1000 + _rng.nextInt(8999)).toString();
-    final prep = cat == OrderCategory.food
+    var prep = cat == OrderCategory.food
         ? 4 + _rng.nextInt(7)
         : cat == OrderCategory.grocery
             ? 3 + _rng.nextInt(5)
             : 2 + _rng.nextInt(4);
+    if (_ownedGear.contains('vip')) prep = (prep * 0.7).ceil();
     final willCancel = _rng.nextDouble() < 0.06;
 
     setState(() {
@@ -818,14 +1043,18 @@ class _CourierHomeState extends State<CourierHome>
 
   double _rollTip(double base) {
     final r = _rng.nextDouble();
-    if (r < 0.50) return 0;
-    if (r < 0.80) return double.parse((1 + _rng.nextDouble() * 2).toStringAsFixed(2));
-    if (r < 0.95) return double.parse((3 + _rng.nextDouble() * 4).toStringAsFixed(2));
-    return double.parse((7 + _rng.nextDouble() * 8).toStringAsFixed(2));
+    double tip;
+    if (r < 0.50) tip = 0;
+    else if (r < 0.80) tip = 1 + _rng.nextDouble() * 2;
+    else if (r < 0.95) tip = 3 + _rng.nextDouble() * 4;
+    else tip = 7 + _rng.nextDouble() * 8;
+    tip *= _zone.tipMul;
+    return double.parse(tip.toStringAsFixed(2));
   }
 
   int _rollCustomerStars() {
-    final r = _rng.nextDouble();
+    final boost = _ownedGear.contains('thermo') ? 0.08 : 0.0;
+    final r = _rng.nextDouble() - boost;
     if (r < 0.78) return 5;
     if (r < 0.93) return 4;
     if (r < 0.98) return 3;
@@ -879,6 +1108,7 @@ class _CourierHomeState extends State<CourierHome>
     if (_level > levelBefore) {
       _showEventBanner('Awans! Poziom $_level', glovoYellow);
     }
+    _saveState();
 
     Timer(const Duration(milliseconds: 3500), () {
       if (!mounted) return;
@@ -911,6 +1141,61 @@ class _CourierHomeState extends State<CourierHome>
           if (d.tip >= 5.0) g.progress++;
       }
     }
+    final w = _weekly;
+    if (w != null && !w.claimed) {
+      if (w.title.contains('dostaw')) {
+        w.progress++;
+      } else if (w.title.contains('netto')) {
+        w.progress = (w.progress + d.net.round()).clamp(0, w.target);
+      } else if (w.title.contains('5★')) {
+        if (d.stars == 5) w.progress++;
+      } else if (w.title.contains('deszczu')) {
+        if (d.weather.isRainy) w.progress++;
+      }
+    }
+  }
+
+  void _claimWeekly() {
+    final w = _weekly;
+    if (w == null || !w.done || w.claimed) return;
+    setState(() {
+      w.claimed = true;
+      _gross += w.reward;
+    });
+    _showEventBanner(
+        'Weekly ukończone! +${w.reward.toStringAsFixed(2)} zł', glovoYellow);
+    Timer(const Duration(milliseconds: 1500), () {
+      if (!mounted) return;
+      setState(() => _weekly = WeeklyChallenge.fresh(_rng));
+      _saveState();
+    });
+    _saveState();
+  }
+
+  void _buyGear(GearItem item) {
+    if (_ownedGear.contains(item.id)) return;
+    final net = _gross - _fuelCost;
+    if (net < item.price) {
+      _toast('Brak środków — potrzebujesz ${item.price} zł netto', glovoRed);
+      return;
+    }
+    setState(() {
+      _ownedGear.add(item.id);
+      _gross -= item.price.toDouble();
+    });
+    _showEventBanner('Zakupiono: ${item.name}', glovoGreen);
+    _saveState();
+  }
+
+  void _switchZone(Zone z) {
+    if (z.unlockLevel > _level) return;
+    if (_state != CourierState.offline) {
+      _toast('Zmień strefę gdy jesteś offline', glovoOrange);
+      return;
+    }
+    setState(() => _zone = z);
+    _showEventBanner('Strefa: ${z.label}', z.color);
+    _saveState();
   }
 
   void _claimGoal(Goal g) {
@@ -921,6 +1206,7 @@ class _CourierHomeState extends State<CourierHome>
     });
     _showEventBanner('Cel ukończony! +${g.reward.toStringAsFixed(2)} zł',
         glovoGreen);
+    _saveState();
     if (_goals.every((x) => x.claimed)) {
       Timer(const Duration(milliseconds: 1500), () {
         if (!mounted) return;
@@ -945,8 +1231,11 @@ class _CourierHomeState extends State<CourierHome>
   void _runRoute({required VoidCallback onComplete}) {
     final o = _currentOrder!;
     _progressTimer?.cancel();
-    final baseSec = (o.distanceKm * _vehicle.secPerKm).clamp(2.5, 30);
+    var secPerKm = _vehicle.secPerKm;
+    if (_ownedGear.contains('gps')) secPerKm *= 0.85;
+    final baseSec = (o.distanceKm * secPerKm).clamp(2.5, 30);
     var totalSteps = (baseSec * 10).round();
+    final trafficChance = _ownedGear.contains('phone') ? 0.005 : 0.012;
     var step = 0;
     var slowdownStepsLeft = 0;
     var trafficTriggered = false;
@@ -960,7 +1249,7 @@ class _CourierHomeState extends State<CourierHome>
       if (!trafficTriggered &&
           step > totalSteps * 0.25 &&
           step < totalSteps * 0.75 &&
-          _rng.nextDouble() < 0.012) {
+          _rng.nextDouble() < trafficChance) {
         trafficTriggered = true;
         slowdownStepsLeft = 25 + _rng.nextInt(20);
         totalSteps += slowdownStepsLeft ~/ 2;
@@ -1013,6 +1302,16 @@ class _CourierHomeState extends State<CourierHome>
 
   @override
   Widget build(BuildContext context) {
+    if (!_loaded) {
+      return const Scaffold(
+        body: Center(
+          child: CircularProgressIndicator(color: glovoYellow),
+        ),
+      );
+    }
+    if (_name == null) {
+      return Scaffold(body: SafeArea(child: _onboardingView()));
+    }
     return Scaffold(
       body: SafeArea(
         child: Column(
@@ -1023,6 +1322,214 @@ class _CourierHomeState extends State<CourierHome>
             if (_tabIndex == 0) _buildBottomBar(),
             _buildBottomNav(),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _onboardingView() {
+    final ctrl = TextEditingController();
+    Vehicle pickedVehicle = Vehicle.scooter;
+    Zone pickedZone = Zone.centrum;
+    return StatefulBuilder(
+      builder: (ctx, setLocal) => Padding(
+        padding: const EdgeInsets.all(24),
+        child: ListView(
+          children: [
+            const SizedBox(height: 20),
+            Center(
+              child: Container(
+                width: 80,
+                height: 80,
+                decoration: const BoxDecoration(
+                  color: glovoYellow,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.delivery_dining_rounded,
+                    color: glovoDark, size: 44),
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Center(
+              child: Text('Glovo Courier Sim',
+                  style:
+                      TextStyle(fontSize: 26, fontWeight: FontWeight.w900)),
+            ),
+            const Center(
+              child: Text('Załóż konto kuriera',
+                  style: TextStyle(color: glovoMuted, fontSize: 14)),
+            ),
+            const SizedBox(height: 28),
+            const Text('Imię',
+                style:
+                    TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+            const SizedBox(height: 6),
+            TextField(
+              controller: ctrl,
+              maxLength: 20,
+              style: const TextStyle(color: Colors.white, fontSize: 16),
+              cursorColor: glovoYellow,
+              decoration: InputDecoration(
+                filled: true,
+                fillColor: glovoCard,
+                hintText: 'np. Mateusz',
+                hintStyle: const TextStyle(color: glovoMuted),
+                counterText: '',
+                border: OutlineInputBorder(
+                  borderSide: BorderSide.none,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 14, vertical: 14),
+              ),
+            ),
+            const SizedBox(height: 18),
+            const Text('Pojazd',
+                style:
+                    TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+            const SizedBox(height: 8),
+            Row(
+              children: Vehicle.values.map((v) {
+                final selected = v == pickedVehicle;
+                return Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(14),
+                      onTap: () =>
+                          setLocal(() => pickedVehicle = v),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        decoration: BoxDecoration(
+                          color: selected
+                              ? glovoYellow.withValues(alpha: 0.18)
+                              : glovoCard,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: selected
+                                ? glovoYellow
+                                : Colors.transparent,
+                            width: 2,
+                          ),
+                        ),
+                        child: Column(
+                          children: [
+                            Icon(v.icon,
+                                color: selected
+                                    ? glovoYellow
+                                    : Colors.white,
+                                size: 28),
+                            const SizedBox(height: 6),
+                            Text(v.label,
+                                style: TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 12,
+                                    color: selected
+                                        ? glovoYellow
+                                        : Colors.white)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 18),
+            const Text('Strefa pracy',
+                style:
+                    TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+            const SizedBox(height: 8),
+            ...Zone.values
+                .where((z) => z.unlockLevel <= 1)
+                .map((z) => _zonePickerCard(z, pickedZone == z,
+                    () => setLocal(() => pickedZone = z))),
+            const SizedBox(height: 24),
+            ElevatedButton(
+              onPressed: () async {
+                final name = ctrl.text.trim();
+                if (name.isEmpty) {
+                  ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+                    content: Text('Wpisz swoje imię'),
+                    backgroundColor: glovoRed,
+                  ));
+                  return;
+                }
+                setState(() {
+                  _name = name;
+                  _vehicle = pickedVehicle;
+                  _zone = pickedZone;
+                });
+                await _saveState();
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: glovoYellow,
+                foregroundColor: glovoDark,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              child: const Text('Zaczynam pracę',
+                  style:
+                      TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+            ),
+            const SizedBox(height: 30),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _zonePickerCard(Zone z, bool selected, VoidCallback onTap) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: selected
+                ? z.color.withValues(alpha: 0.15)
+                : glovoCard,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+                color: selected ? z.color : Colors.transparent, width: 2),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: z.color.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(z.icon, color: z.color, size: 24),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(z.label,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w800, fontSize: 14)),
+                    Text(z.desc,
+                        style: const TextStyle(
+                            color: glovoMuted, fontSize: 11)),
+                    Text(
+                        'Demand ×${z.demandMul.toStringAsFixed(2)} · Payout ×${z.payoutMul.toStringAsFixed(2)} · Tip ×${z.tipMul.toStringAsFixed(2)}',
+                        style: TextStyle(color: z.color, fontSize: 10)),
+                  ],
+                ),
+              ),
+              if (selected)
+                Icon(Icons.check_circle_rounded, color: z.color, size: 22),
+            ],
+          ),
         ),
       ),
     );
@@ -1056,6 +1563,8 @@ class _CourierHomeState extends State<CourierHome>
         return _buildStatsTab();
       case 2:
         return _buildGoalsTab();
+      case 3:
+        return _buildProfileTab();
       default:
         return _buildBody();
     }
@@ -1068,12 +1577,13 @@ class _CourierHomeState extends State<CourierHome>
         border: Border(top: BorderSide(color: glovoDark, width: 1)),
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
         child: Row(
           children: [
             _navItem(0, Icons.work_rounded, 'Zlecenia'),
             _navItem(1, Icons.bar_chart_rounded, 'Statystyki'),
             _navItem(2, Icons.flag_rounded, 'Cele'),
+            _navItem(3, Icons.person_rounded, 'Profil'),
           ],
         ),
       ),
@@ -1176,11 +1686,13 @@ class _CourierHomeState extends State<CourierHome>
                   children: [
                     Row(
                       children: [
-                        const Text('Mateusz',
-                            style: TextStyle(
+                        Text(_name ?? 'Kurier',
+                            style: const TextStyle(
                                 fontWeight: FontWeight.w800, fontSize: 15)),
                         const SizedBox(width: 6),
                         Icon(_vehicle.icon, size: 14, color: glovoMuted),
+                        const SizedBox(width: 6),
+                        Icon(_zone.icon, size: 14, color: _zone.color),
                       ],
                     ),
                     Row(
@@ -1724,6 +2236,397 @@ class _CourierHomeState extends State<CourierHome>
               valueColor: AlwaysStoppedAnimation(
                   g.claimed ? glovoGreen : glovoYellow),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ===== PROFILE TAB =====
+  Widget _buildProfileTab() {
+    final net = _gross - _fuelCost;
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: glovoCard,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Row(
+            children: [
+              Stack(
+                alignment: Alignment.center,
+                children: [
+                  SizedBox(
+                    width: 70,
+                    height: 70,
+                    child: CircularProgressIndicator(
+                      value: _xp / _xpPerLevel,
+                      strokeWidth: 4,
+                      backgroundColor: glovoCardLight,
+                      valueColor:
+                          const AlwaysStoppedAnimation(glovoYellow),
+                    ),
+                  ),
+                  Container(
+                    width: 56,
+                    height: 56,
+                    decoration: const BoxDecoration(
+                      color: glovoYellow,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Center(
+                      child: Text('$_level',
+                          style: const TextStyle(
+                              color: glovoDark,
+                              fontWeight: FontWeight.w900,
+                              fontSize: 22)),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(_name ?? 'Kurier',
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w800, fontSize: 18)),
+                    Row(
+                      children: [
+                        const Icon(Icons.star_rounded,
+                            color: glovoYellow, size: 14),
+                        const SizedBox(width: 2),
+                        Text(_rating.toStringAsFixed(2),
+                            style: const TextStyle(
+                                color: glovoMuted, fontSize: 12)),
+                        const SizedBox(width: 8),
+                        const Icon(Icons.local_shipping_rounded,
+                            color: glovoMuted, size: 12),
+                        const SizedBox(width: 2),
+                        Text('$_completed dostaw',
+                            style: const TextStyle(
+                                color: glovoMuted, fontSize: 12)),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text('Saldo netto: ${net.toStringAsFixed(2)} zł',
+                        style: const TextStyle(
+                            color: glovoGreen,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 14)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 18),
+
+        // ===== Weekly Challenge =====
+        if (_weekly != null) ...[
+          Row(
+            children: [
+              const Icon(Icons.calendar_month_rounded,
+                  color: glovoPurple, size: 18),
+              const SizedBox(width: 6),
+              const Text('Wyzwanie tygodniowe',
+                  style: TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+            ],
+          ),
+          const SizedBox(height: 8),
+          _weeklyCard(_weekly!),
+          const SizedBox(height: 18),
+        ],
+
+        // ===== Zones =====
+        Row(
+          children: [
+            const Icon(Icons.map_rounded, color: glovoBlue, size: 18),
+            const SizedBox(width: 6),
+            const Text('Strefa pracy',
+                style:
+                    TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+          ],
+        ),
+        const SizedBox(height: 8),
+        ...Zone.values.map(_zoneRow),
+        const SizedBox(height: 18),
+
+        // ===== Gear Shop =====
+        Row(
+          children: [
+            const Icon(Icons.shopping_basket_rounded,
+                color: glovoYellow, size: 18),
+            const SizedBox(width: 6),
+            const Text('Sklep wyposażenia',
+                style:
+                    TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+            const Spacer(),
+            Text('Saldo: ${net.toStringAsFixed(2)} zł',
+                style: const TextStyle(color: glovoGreen, fontSize: 12)),
+          ],
+        ),
+        const SizedBox(height: 8),
+        ..._gearCatalog.map(_gearRow),
+        const SizedBox(height: 18),
+
+        // ===== Reset =====
+        TextButton.icon(
+          onPressed: () => _confirmReset(),
+          icon: const Icon(Icons.refresh_rounded,
+              color: glovoRed, size: 16),
+          label: const Text('Resetuj cały postęp',
+              style: TextStyle(color: glovoRed, fontSize: 12)),
+        ),
+        const SizedBox(height: 80),
+      ],
+    );
+  }
+
+  Widget _weeklyCard(WeeklyChallenge w) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [glovoPurple.withValues(alpha: 0.25), glovoCard],
+        ),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: w.claimed
+              ? glovoGreen
+              : (w.done ? glovoYellow : glovoPurple.withValues(alpha: 0.5)),
+          width: 1.5,
+        ),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: glovoPurple.withValues(alpha: 0.25),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(w.icon, color: glovoPurple, size: 24),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(w.title,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w800, fontSize: 14)),
+                    Text(
+                        'Postęp: ${w.progress}/${w.target} · Nagroda: ${w.reward.toStringAsFixed(0)} zł',
+                        style: const TextStyle(
+                            color: glovoMuted, fontSize: 12)),
+                  ],
+                ),
+              ),
+              if (w.claimed)
+                const Icon(Icons.check_circle_rounded,
+                    color: glovoGreen, size: 26)
+              else if (w.done)
+                ElevatedButton(
+                  onPressed: _claimWeekly,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: glovoYellow,
+                    foregroundColor: glovoDark,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 6),
+                    minimumSize: const Size(0, 0),
+                    elevation: 0,
+                  ),
+                  child: const Text('Odbierz',
+                      style: TextStyle(
+                          fontWeight: FontWeight.w800, fontSize: 12)),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: LinearProgressIndicator(
+              value: w.fraction,
+              minHeight: 8,
+              backgroundColor: glovoCardLight,
+              valueColor:
+                  AlwaysStoppedAnimation(w.claimed ? glovoGreen : glovoPurple),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _zoneRow(Zone z) {
+    final selected = _zone == z;
+    final locked = z.unlockLevel > _level;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: locked ? null : () => _switchZone(z),
+        child: Opacity(
+          opacity: locked ? 0.5 : 1,
+          child: Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: selected ? z.color.withValues(alpha: 0.15) : glovoCard,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: selected ? z.color : Colors.transparent,
+                width: 2,
+              ),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: z.color.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(z.icon, color: z.color, size: 22),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(z.label,
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w800, fontSize: 14)),
+                      Text(z.desc,
+                          style: const TextStyle(
+                              color: glovoMuted, fontSize: 11)),
+                      Text(
+                          'Demand ×${z.demandMul.toStringAsFixed(2)} · Payout ×${z.payoutMul.toStringAsFixed(2)} · Tip ×${z.tipMul.toStringAsFixed(2)}',
+                          style: TextStyle(color: z.color, fontSize: 10)),
+                    ],
+                  ),
+                ),
+                if (locked)
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      const Icon(Icons.lock_rounded,
+                          color: glovoMuted, size: 16),
+                      Text('lvl ${z.unlockLevel}',
+                          style: const TextStyle(
+                              color: glovoMuted, fontSize: 10)),
+                    ],
+                  )
+                else if (selected)
+                  Icon(Icons.check_circle_rounded, color: z.color, size: 20),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _gearRow(GearItem g) {
+    final owned = _ownedGear.contains(g.id);
+    final net = _gross - _fuelCost;
+    final canAfford = net >= g.price;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: glovoCard,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+              color: owned ? glovoGreen : Colors.transparent, width: 1.5),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: glovoYellow.withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(g.icon, color: glovoYellow, size: 22),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(g.name,
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w800, fontSize: 14)),
+                  Text(g.desc,
+                      style: const TextStyle(
+                          color: glovoMuted, fontSize: 11)),
+                ],
+              ),
+            ),
+            if (owned)
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 6),
+                child: Icon(Icons.check_circle_rounded,
+                    color: glovoGreen, size: 24),
+              )
+            else
+              ElevatedButton(
+                onPressed: canAfford ? () => _buyGear(g) : null,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: canAfford ? glovoYellow : glovoCardLight,
+                  foregroundColor:
+                      canAfford ? glovoDark : glovoMuted,
+                  disabledBackgroundColor: glovoCardLight,
+                  disabledForegroundColor: glovoMuted,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 6),
+                  minimumSize: const Size(0, 0),
+                  elevation: 0,
+                ),
+                child: Text('${g.price} zł',
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w800, fontSize: 12)),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _confirmReset() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: glovoCard,
+        title: const Text('Reset całego postępu?'),
+        content: const Text(
+            'Stracisz poziom, kasę, wyposażenie i wszystkie statystyki. Tej akcji nie można cofnąć.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Anuluj',
+                style: TextStyle(color: glovoMuted)),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.of(ctx).pop();
+              await _resetProgress();
+            },
+            child: const Text('Resetuj',
+                style: TextStyle(
+                    color: glovoRed, fontWeight: FontWeight.w800)),
           ),
         ],
       ),
