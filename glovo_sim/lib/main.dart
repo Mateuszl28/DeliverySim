@@ -125,6 +125,98 @@ class Order {
   double get bonusFromWeather => basePay * surge * (weatherAtPickup.bonus - 1.0);
 }
 
+class CompletedDelivery {
+  final OrderCategory category;
+  final String partner;
+  final String customer;
+  final double net;
+  final double gross;
+  final double tip;
+  final int stars;
+  final Weather weather;
+  final int simHour;
+  final double surge;
+  final double distanceKm;
+  CompletedDelivery({
+    required this.category,
+    required this.partner,
+    required this.customer,
+    required this.net,
+    required this.gross,
+    required this.tip,
+    required this.stars,
+    required this.weather,
+    required this.simHour,
+    required this.surge,
+    required this.distanceKm,
+  });
+}
+
+enum GoalKind {
+  deliveries('dostaw'),
+  earnings('zł netto'),
+  fiveStars('ocen 5★'),
+  rainDelivery('w deszczu'),
+  peakDelivery('w peak'),
+  category('w kategorii'),
+  bigTip('napiwek 5+ zł');
+
+  final String unit;
+  const GoalKind(this.unit);
+}
+
+class Goal {
+  final GoalKind kind;
+  final int target;
+  final double reward;
+  final OrderCategory? category;
+  int progress;
+  bool claimed;
+
+  Goal({
+    required this.kind,
+    required this.target,
+    required this.reward,
+    this.category,
+    this.progress = 0,
+    this.claimed = false,
+  });
+
+  bool get done => progress >= target;
+  double get fraction => (progress / target).clamp(0.0, 1.0);
+
+  String get title {
+    switch (kind) {
+      case GoalKind.deliveries:
+        return 'Wykonaj $target ${target == 1 ? "dostawę" : "dostaw"}';
+      case GoalKind.earnings:
+        return 'Zarób $target zł netto';
+      case GoalKind.fiveStars:
+        return 'Zdobądź $target ocen 5★';
+      case GoalKind.rainDelivery:
+        return 'Dostaw $target ${target == 1 ? "raz" : "razy"} w deszczu';
+      case GoalKind.peakDelivery:
+        return 'Dostaw $target ${target == 1 ? "raz" : "razy"} w peak';
+      case GoalKind.category:
+        return 'Dostaw $target z ${category!.label}';
+      case GoalKind.bigTip:
+        return 'Otrzymaj $target ${target == 1 ? "duży napiwek" : "duże napiwki"} (5+ zł)';
+    }
+  }
+
+  IconData get icon {
+    switch (kind) {
+      case GoalKind.deliveries: return Icons.local_shipping_rounded;
+      case GoalKind.earnings: return Icons.payments_rounded;
+      case GoalKind.fiveStars: return Icons.star_rounded;
+      case GoalKind.rainDelivery: return Icons.umbrella_rounded;
+      case GoalKind.peakDelivery: return Icons.local_fire_department_rounded;
+      case GoalKind.category: return category!.icon;
+      case GoalKind.bigTip: return Icons.savings_rounded;
+    }
+  }
+}
+
 enum CourierState {
   offline,
   searching,
@@ -174,6 +266,25 @@ class _CourierHomeState extends State<CourierHome>
   double _fuelCost = 0;
   double _rating = 4.92;
   int _onlineSeconds = 0;
+
+  int _tabIndex = 0;
+  int _level = 1;
+  int _xp = 0;
+  static const int _xpPerLevel = 120;
+
+  final List<CompletedDelivery> _history = [];
+  late List<Goal> _goals;
+  double _bestTip = 0;
+  double _bestNet = 0;
+
+  String? _eventBanner;
+  Color _eventColor = glovoBlue;
+  Timer? _eventBannerTimer;
+
+  // Last shift snapshot, captured when ending a shift
+  int? _lastShiftDeliveries;
+  double? _lastShiftNet;
+  int? _lastShiftSeconds;
 
   late final AnimationController _pulseCtrl;
   late final AnimationController _rainCtrl;
@@ -254,6 +365,26 @@ class _CourierHomeState extends State<CourierHome>
       vsync: this,
       duration: const Duration(milliseconds: 800),
     )..repeat();
+    _goals = _generateDailyGoals();
+  }
+
+  List<Goal> _generateDailyGoals() {
+    final pool = <Goal>[
+      Goal(kind: GoalKind.deliveries, target: 3, reward: 6),
+      Goal(kind: GoalKind.deliveries, target: 5, reward: 10),
+      Goal(kind: GoalKind.earnings, target: 30, reward: 5),
+      Goal(kind: GoalKind.earnings, target: 75, reward: 12),
+      Goal(kind: GoalKind.fiveStars, target: 3, reward: 5),
+      Goal(kind: GoalKind.rainDelivery, target: 1, reward: 4),
+      Goal(kind: GoalKind.peakDelivery, target: 2, reward: 6),
+      Goal(kind: GoalKind.bigTip, target: 1, reward: 5),
+      Goal(kind: GoalKind.category, target: 2, reward: 5,
+          category: OrderCategory.grocery),
+      Goal(kind: GoalKind.category, target: 1, reward: 4,
+          category: OrderCategory.pharmacy),
+    ];
+    pool.shuffle(_rng);
+    return pool.take(3).toList();
   }
 
   @override
@@ -265,6 +396,7 @@ class _CourierHomeState extends State<CourierHome>
     _orderTimer?.cancel();
     _progressTimer?.cancel();
     _prepTimer?.cancel();
+    _eventBannerTimer?.cancel();
     super.dispose();
   }
 
@@ -373,12 +505,22 @@ class _CourierHomeState extends State<CourierHome>
   }
 
   void _stopShift() {
+    final shiftDeliveries = _completed - (_lastShiftDeliveries ?? 0);
+    final shiftNet = (_gross - _fuelCost) -
+        ((_lastShiftNet ?? 0));
+    final shiftSeconds = _onlineSeconds - (_lastShiftSeconds ?? 0);
+    _lastShiftDeliveries = _completed;
+    _lastShiftNet = _gross - _fuelCost;
+    _lastShiftSeconds = _onlineSeconds;
     _resetTimers();
     setState(() {
       _state = CourierState.offline;
       _currentOrder = null;
       _routeProgress = 0;
     });
+    if (shiftDeliveries > 0) {
+      _showShiftSummary(shiftDeliveries, shiftNet, shiftSeconds);
+    }
   }
 
   void _resetTimers() {
@@ -694,13 +836,50 @@ class _CourierHomeState extends State<CourierHome>
   void _finalizeDelivery() {
     final o = _currentOrder!;
     final fuel = o.distanceKm * 1.5 * _vehicle.fuelPerKm;
+    final net = o.gross - fuel;
+    final delivery = CompletedDelivery(
+      category: o.category,
+      partner: o.partner,
+      customer: o.customer,
+      net: net,
+      gross: o.gross,
+      tip: o.tip,
+      stars: o.customerStars,
+      weather: o.weatherAtPickup,
+      simHour: _simHour,
+      surge: o.surge,
+      distanceKm: o.distanceKm,
+    );
+
+    final int xpGain = 10 +
+        max<int>(0, (o.customerStars - 3) * 3) +
+        (o.tip / 2).round() +
+        (o.surge >= 1.4 ? 5 : 0);
+
+    final levelBefore = _level;
+
     setState(() {
       _completed++;
       _gross += o.gross;
       _fuelCost += fuel;
-      _rating = (_rating * 0.92 + o.customerStars * 0.08);
+      _rating = _rating * 0.92 + o.customerStars * 0.08;
       _state = CourierState.delivered;
+      _history.insert(0, delivery);
+      if (_history.length > 50) _history.removeLast();
+      if (o.tip > _bestTip) _bestTip = o.tip;
+      if (net > _bestNet) _bestNet = net;
+      _xp += xpGain;
+      while (_xp >= _xpPerLevel) {
+        _xp -= _xpPerLevel;
+        _level++;
+      }
+      _updateGoals(delivery);
     });
+
+    if (_level > levelBefore) {
+      _showEventBanner('Awans! Poziom $_level', glovoYellow);
+    }
+
     Timer(const Duration(milliseconds: 3500), () {
       if (!mounted) return;
       setState(() {
@@ -712,19 +891,99 @@ class _CourierHomeState extends State<CourierHome>
     });
   }
 
+  void _updateGoals(CompletedDelivery d) {
+    for (final g in _goals) {
+      if (g.claimed) continue;
+      switch (g.kind) {
+        case GoalKind.deliveries:
+          g.progress++;
+        case GoalKind.earnings:
+          g.progress = (g.progress + d.net.round()).clamp(0, g.target);
+        case GoalKind.fiveStars:
+          if (d.stars == 5) g.progress++;
+        case GoalKind.rainDelivery:
+          if (d.weather.isRainy) g.progress++;
+        case GoalKind.peakDelivery:
+          if (d.surge >= 1.4) g.progress++;
+        case GoalKind.category:
+          if (d.category == g.category) g.progress++;
+        case GoalKind.bigTip:
+          if (d.tip >= 5.0) g.progress++;
+      }
+    }
+  }
+
+  void _claimGoal(Goal g) {
+    if (!g.done || g.claimed) return;
+    setState(() {
+      g.claimed = true;
+      _gross += g.reward;
+    });
+    _showEventBanner('Cel ukończony! +${g.reward.toStringAsFixed(2)} zł',
+        glovoGreen);
+    if (_goals.every((x) => x.claimed)) {
+      Timer(const Duration(milliseconds: 1500), () {
+        if (!mounted) return;
+        setState(() => _goals = _generateDailyGoals());
+        _showEventBanner('Nowe cele dzienne dostępne!', glovoBlue);
+      });
+    }
+  }
+
+  void _showEventBanner(String text, Color color) {
+    _eventBannerTimer?.cancel();
+    setState(() {
+      _eventBanner = text;
+      _eventColor = color;
+    });
+    _eventBannerTimer = Timer(const Duration(seconds: 3), () {
+      if (!mounted) return;
+      setState(() => _eventBanner = null);
+    });
+  }
+
   void _runRoute({required VoidCallback onComplete}) {
     final o = _currentOrder!;
     _progressTimer?.cancel();
-    final totalSec = (o.distanceKm * _vehicle.secPerKm).clamp(2.5, 30);
-    final totalSteps = (totalSec * 10).round();
+    final baseSec = (o.distanceKm * _vehicle.secPerKm).clamp(2.5, 30);
+    var totalSteps = (baseSec * 10).round();
     var step = 0;
+    var slowdownStepsLeft = 0;
+    var trafficTriggered = false;
+    var phoneTriggered = false;
     _progressTimer = Timer.periodic(const Duration(milliseconds: 100), (t) {
       if (!mounted) {
         t.cancel();
         return;
       }
+      // Random events during route (only after some progress)
+      if (!trafficTriggered &&
+          step > totalSteps * 0.25 &&
+          step < totalSteps * 0.75 &&
+          _rng.nextDouble() < 0.012) {
+        trafficTriggered = true;
+        slowdownStepsLeft = 25 + _rng.nextInt(20);
+        totalSteps += slowdownStepsLeft ~/ 2;
+        _showEventBanner('Korek na trasie — opóźnienie', glovoOrange);
+      }
+      if (!phoneTriggered &&
+          _state == CourierState.toCustomer &&
+          step > totalSteps * 0.4 &&
+          _rng.nextDouble() < 0.008) {
+        phoneTriggered = true;
+        _showEventBanner('${o.customer}: "Czy mogę dostać dodatkowe sztućce?"',
+            glovoBlue);
+      }
+
+      // Slowdown: every 2nd tick during slowdown skips progress
+      if (slowdownStepsLeft > 0) {
+        slowdownStepsLeft--;
+        if (slowdownStepsLeft.isOdd) {
+          return;
+        }
+      }
       step++;
-      setState(() => _routeProgress = step / totalSteps);
+      setState(() => _routeProgress = (step / totalSteps).clamp(0.0, 1.0));
       if (step >= totalSteps) {
         t.cancel();
         onComplete();
@@ -759,9 +1018,108 @@ class _CourierHomeState extends State<CourierHome>
         child: Column(
           children: [
             _buildHeader(),
-            Expanded(child: _buildBody()),
-            _buildBottomBar(),
+            if (_eventBanner != null) _eventBannerWidget(),
+            Expanded(child: _buildTabContent()),
+            if (_tabIndex == 0) _buildBottomBar(),
+            _buildBottomNav(),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _eventBannerWidget() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      color: _eventColor.withValues(alpha: 0.18),
+      child: Row(
+        children: [
+          Icon(Icons.notifications_active_rounded,
+              color: _eventColor, size: 16),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(_eventBanner!,
+                style: TextStyle(
+                    color: _eventColor,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTabContent() {
+    switch (_tabIndex) {
+      case 1:
+        return _buildStatsTab();
+      case 2:
+        return _buildGoalsTab();
+      default:
+        return _buildBody();
+    }
+  }
+
+  Widget _buildBottomNav() {
+    return Container(
+      decoration: const BoxDecoration(
+        color: glovoCard,
+        border: Border(top: BorderSide(color: glovoDark, width: 1)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        child: Row(
+          children: [
+            _navItem(0, Icons.work_rounded, 'Zlecenia'),
+            _navItem(1, Icons.bar_chart_rounded, 'Statystyki'),
+            _navItem(2, Icons.flag_rounded, 'Cele'),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _navItem(int idx, IconData icon, String label) {
+    final selected = _tabIndex == idx;
+    final pendingClaim = idx == 2 &&
+        _goals.any((g) => g.done && !g.claimed);
+    return Expanded(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => setState(() => _tabIndex = idx),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Column(
+            children: [
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Icon(icon,
+                      color: selected ? glovoYellow : glovoMuted, size: 24),
+                  if (pendingClaim)
+                    Positioned(
+                      right: -3,
+                      top: -2,
+                      child: Container(
+                        width: 10,
+                        height: 10,
+                        decoration: const BoxDecoration(
+                          color: glovoRed,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 2),
+              Text(label,
+                  style: TextStyle(
+                      fontSize: 10,
+                      color: selected ? glovoYellow : glovoMuted,
+                      fontWeight: FontWeight.w700)),
+            ],
+          ),
         ),
       ),
     );
@@ -780,20 +1138,36 @@ class _CourierHomeState extends State<CourierHome>
         children: [
           Row(
             children: [
-              Container(
-                width: 42,
-                height: 42,
-                decoration: const BoxDecoration(
-                  color: glovoYellow,
-                  shape: BoxShape.circle,
-                ),
-                child: const Center(
-                  child: Text('M',
-                      style: TextStyle(
-                          color: glovoDark,
-                          fontWeight: FontWeight.w900,
-                          fontSize: 20)),
-                ),
+              Stack(
+                alignment: Alignment.center,
+                children: [
+                  SizedBox(
+                    width: 48,
+                    height: 48,
+                    child: CircularProgressIndicator(
+                      value: _xp / _xpPerLevel,
+                      strokeWidth: 3,
+                      backgroundColor: glovoCardLight,
+                      valueColor:
+                          const AlwaysStoppedAnimation(glovoYellow),
+                    ),
+                  ),
+                  Container(
+                    width: 38,
+                    height: 38,
+                    decoration: const BoxDecoration(
+                      color: glovoYellow,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Center(
+                      child: Text('$_level',
+                          style: const TextStyle(
+                              color: glovoDark,
+                              fontWeight: FontWeight.w900,
+                              fontSize: 16)),
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -965,6 +1339,481 @@ class _CourierHomeState extends State<CourierHome>
       case CourierState.delivered:
         return _deliveredView();
     }
+  }
+
+  // ===== STATS TAB =====
+  Widget _buildStatsTab() {
+    final net = _gross - _fuelCost;
+    final acceptance = _completed + _rejected + _cancelled == 0
+        ? 0.0
+        : _completed / (_completed + _rejected + _cancelled);
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        const Text('Statystyki ogólne',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            _bigStatCard('Brutto', '${_gross.toStringAsFixed(2)} zł',
+                Icons.payments_rounded, glovoYellow),
+            const SizedBox(width: 8),
+            _bigStatCard('Netto', '${net.toStringAsFixed(2)} zł',
+                Icons.account_balance_wallet_rounded, glovoGreen),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            _bigStatCard('Paliwo', '-${_fuelCost.toStringAsFixed(2)} zł',
+                Icons.local_gas_station_rounded, glovoRed),
+            const SizedBox(width: 8),
+            _bigStatCard('Akceptacja',
+                '${(acceptance * 100).toStringAsFixed(0)}%',
+                Icons.check_circle_rounded, glovoBlue),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            _bigStatCard('Najlepszy napiwek',
+                '${_bestTip.toStringAsFixed(2)} zł',
+                Icons.savings_rounded, glovoGreen),
+            const SizedBox(width: 8),
+            _bigStatCard('Top dostawa',
+                '${_bestNet.toStringAsFixed(2)} zł',
+                Icons.emoji_events_rounded, glovoYellow),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            _bigStatCard('Odrzucone', '$_rejected',
+                Icons.cancel_outlined, glovoMuted),
+            const SizedBox(width: 8),
+            _bigStatCard('Anulowane', '$_cancelled',
+                Icons.report_gmailerrorred_rounded, glovoOrange),
+          ],
+        ),
+        const SizedBox(height: 24),
+        Row(
+          children: [
+            const Icon(Icons.history_rounded, color: glovoYellow, size: 18),
+            const SizedBox(width: 6),
+            Text('Historia dostaw (${_history.length})',
+                style: const TextStyle(
+                    fontSize: 16, fontWeight: FontWeight.w800)),
+          ],
+        ),
+        const SizedBox(height: 8),
+        if (_history.isEmpty)
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: glovoCard,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: const Center(
+              child: Text('Brak ukończonych dostaw',
+                  style: TextStyle(color: glovoMuted)),
+            ),
+          )
+        else
+          ..._history.map(_historyTile),
+        const SizedBox(height: 80),
+      ],
+    );
+  }
+
+  Widget _bigStatCard(
+      String label, String value, IconData icon, Color color) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: glovoCard,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, color: color, size: 18),
+            const SizedBox(height: 6),
+            Text(value,
+                style: const TextStyle(
+                    fontWeight: FontWeight.w800, fontSize: 16)),
+            Text(label,
+                style: const TextStyle(color: glovoMuted, fontSize: 11)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _historyTile(CompletedDelivery d) {
+    final hourStr = '${d.simHour.toString().padLeft(2, '0')}:00';
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: glovoCard,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: d.category.color.withValues(alpha: 0.18),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(d.category.icon, color: d.category.color, size: 18),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(d.partner,
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w700, fontSize: 14)),
+                Text('→ ${d.customer}',
+                    style: const TextStyle(
+                        color: glovoMuted, fontSize: 11)),
+                const SizedBox(height: 2),
+                Row(
+                  children: [
+                    ...List.generate(
+                        5,
+                        (i) => Icon(
+                              i < d.stars
+                                  ? Icons.star_rounded
+                                  : Icons.star_outline_rounded,
+                              color:
+                                  i < d.stars ? glovoYellow : glovoMuted,
+                              size: 11,
+                            )),
+                    const SizedBox(width: 6),
+                    Icon(d.weather.icon, color: d.weather.color, size: 11),
+                    const SizedBox(width: 4),
+                    Text(hourStr,
+                        style: const TextStyle(
+                            color: glovoMuted, fontSize: 10)),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text('${d.net.toStringAsFixed(2)} zł',
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w800,
+                      color: glovoGreen,
+                      fontSize: 14)),
+              if (d.tip > 0)
+                Text('+${d.tip.toStringAsFixed(2)} tip',
+                    style: const TextStyle(
+                        color: glovoMuted, fontSize: 10)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ===== GOALS TAB =====
+  Widget _buildGoalsTab() {
+    final claimed = _goals.where((g) => g.claimed).length;
+    final totalReward = _goals.fold<double>(0, (s, g) => s + g.reward);
+    final claimedReward = _goals
+        .where((g) => g.claimed)
+        .fold<double>(0, (s, g) => s + g.reward);
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        const Text('Cele dzienne',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+        const SizedBox(height: 6),
+        Text('Postęp: $claimed/${_goals.length} · Pula: ${claimedReward.toStringAsFixed(2)}/${totalReward.toStringAsFixed(2)} zł',
+            style: const TextStyle(color: glovoMuted, fontSize: 12)),
+        const SizedBox(height: 12),
+        ..._goals.map(_goalTile),
+        const SizedBox(height: 24),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: glovoCard,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.military_tech_rounded,
+                      color: glovoYellow, size: 18),
+                  const SizedBox(width: 6),
+                  const Text('Poziom kuriera',
+                      style: TextStyle(
+                          fontSize: 14, fontWeight: FontWeight.w800)),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Container(
+                    width: 50,
+                    height: 50,
+                    decoration: const BoxDecoration(
+                      color: glovoYellow,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Center(
+                      child: Text('$_level',
+                          style: const TextStyle(
+                              color: glovoDark,
+                              fontWeight: FontWeight.w900,
+                              fontSize: 22)),
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Poziom $_level',
+                            style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 16)),
+                        const SizedBox(height: 4),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: LinearProgressIndicator(
+                            value: _xp / _xpPerLevel,
+                            minHeight: 8,
+                            backgroundColor: glovoCardLight,
+                            valueColor:
+                                const AlwaysStoppedAnimation(glovoYellow),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text('$_xp / $_xpPerLevel XP',
+                            style: const TextStyle(
+                                color: glovoMuted, fontSize: 11)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        if (_lastShiftDeliveries != null && _lastShiftDeliveries! > 0) ...[
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: glovoCard,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Row(
+                  children: [
+                    Icon(Icons.history_toggle_off_rounded,
+                        color: glovoBlue, size: 18),
+                    SizedBox(width: 6),
+                    Text('Ostatnia zmiana',
+                        style: TextStyle(
+                            fontSize: 14, fontWeight: FontWeight.w800)),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                    'Dostaw: $_lastShiftDeliveries · Czas: ${_formatTime(_lastShiftSeconds ?? 0)}',
+                    style: const TextStyle(color: glovoMuted, fontSize: 13)),
+                Text('Netto: ${(_lastShiftNet ?? 0).toStringAsFixed(2)} zł',
+                    style: const TextStyle(
+                        color: glovoGreen,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14)),
+              ],
+            ),
+          ),
+        ],
+        const SizedBox(height: 80),
+      ],
+    );
+  }
+
+  Widget _goalTile(Goal g) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: glovoCard,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: g.claimed
+              ? glovoGreen.withValues(alpha: 0.6)
+              : g.done
+                  ? glovoYellow
+                  : Colors.transparent,
+          width: g.claimed || g.done ? 1.5 : 0,
+        ),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: glovoYellow.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(g.icon, color: glovoYellow, size: 20),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(g.title,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w700, fontSize: 13)),
+                    Text(
+                        'Postęp: ${g.progress}/${g.target} · Nagroda: ${g.reward.toStringAsFixed(2)} zł',
+                        style: const TextStyle(
+                            color: glovoMuted, fontSize: 11)),
+                  ],
+                ),
+              ),
+              if (g.claimed)
+                const Icon(Icons.check_circle_rounded,
+                    color: glovoGreen, size: 24)
+              else if (g.done)
+                ElevatedButton(
+                  onPressed: () => _claimGoal(g),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: glovoYellow,
+                    foregroundColor: glovoDark,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 6),
+                    minimumSize: const Size(0, 0),
+                    elevation: 0,
+                  ),
+                  child: const Text('Odbierz',
+                      style: TextStyle(
+                          fontWeight: FontWeight.w800, fontSize: 12)),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: LinearProgressIndicator(
+              value: g.fraction,
+              minHeight: 6,
+              backgroundColor: glovoCardLight,
+              valueColor: AlwaysStoppedAnimation(
+                  g.claimed ? glovoGreen : glovoYellow),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ===== SHIFT SUMMARY MODAL =====
+  void _showShiftSummary(int deliveries, double net, int seconds) {
+    showDialog(
+      context: context,
+      barrierColor: Colors.black54,
+      builder: (ctx) => Dialog(
+        backgroundColor: glovoCard,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20)),
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 70,
+                height: 70,
+                decoration: BoxDecoration(
+                  color: glovoYellow.withValues(alpha: 0.18),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.emoji_events_rounded,
+                    color: glovoYellow, size: 38),
+              ),
+              const SizedBox(height: 14),
+              const Text('Koniec zmiany',
+                  style: TextStyle(
+                      fontSize: 20, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 16),
+              _summaryRow('Dostaw wykonanych', '$deliveries'),
+              _summaryRow('Czas zmiany', _formatTime(seconds)),
+              _summaryRow('Średnia / godzinę',
+                  seconds > 0
+                      ? '${(net / (seconds / 3600)).toStringAsFixed(2)} zł/h'
+                      : '—'),
+              const Divider(color: glovoCardLight),
+              _summaryRow('Netto', '${net.toStringAsFixed(2)} zł',
+                  highlight: true),
+              const SizedBox(height: 18),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: glovoYellow,
+                    foregroundColor: glovoDark,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14)),
+                  ),
+                  child: const Text('Do widzenia',
+                      style: TextStyle(
+                          fontWeight: FontWeight.w800, fontSize: 15)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _summaryRow(String label, String value, {bool highlight = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(label,
+                style: TextStyle(
+                    color: highlight ? Colors.white : glovoMuted,
+                    fontSize: highlight ? 16 : 13,
+                    fontWeight:
+                        highlight ? FontWeight.w800 : FontWeight.w500)),
+          ),
+          Text(value,
+              style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: highlight ? 20 : 14,
+                  color: highlight ? glovoYellow : Colors.white)),
+        ],
+      ),
+    );
   }
 
   Widget _offlineView() {
