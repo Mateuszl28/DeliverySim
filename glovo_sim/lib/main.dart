@@ -101,6 +101,7 @@ class Order {
   final String pickupCode;
   final int prepSeconds;
   final bool willCancel;
+  final bool isRegular;
   double tip;
   int customerStars;
 
@@ -118,6 +119,7 @@ class Order {
     required this.pickupCode,
     required this.prepSeconds,
     required this.willCancel,
+    this.isRegular = false,
   })  : tip = 0,
         customerStars = 5;
 
@@ -490,6 +492,53 @@ class WeeklyChallenge {
   }
 }
 
+class LeaderboardEntry {
+  final String name;
+  final double weeklyNet;
+  final int deliveries;
+  final bool isPlayer;
+  final int level;
+  const LeaderboardEntry({
+    required this.name,
+    required this.weeklyNet,
+    required this.deliveries,
+    required this.level,
+    this.isPlayer = false,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'name': name,
+        'weeklyNet': weeklyNet,
+        'deliveries': deliveries,
+        'level': level,
+      };
+
+  static LeaderboardEntry fromJson(Map<String, dynamic> m) =>
+      LeaderboardEntry(
+        name: m['name'] as String,
+        weeklyNet: (m['weeklyNet'] as num).toDouble(),
+        deliveries: m['deliveries'] as int,
+        level: m['level'] as int,
+      );
+}
+
+const _ghostNames = [
+  'Kacper M.',
+  'Aleksandra W.',
+  'Bartłomiej R.',
+  'Natalia S.',
+  'Dawid P.',
+  'Wiktoria L.',
+  'Filip Z.',
+  'Oliwia G.',
+  'Mateusz K.',
+  'Zuzanna B.',
+  'Sebastian H.',
+  'Patryk D.',
+  'Igor F.',
+  'Maja Ż.',
+];
+
 enum CourierState {
   offline,
   searching,
@@ -497,6 +546,7 @@ enum CourierState {
   toRestaurant,
   atRestaurantWaiting,
   atRestaurantReady,
+  takingPhoto,
   orderCancelled,
   toCustomer,
   atCustomer,
@@ -564,6 +614,18 @@ class _CourierHomeState extends State<CourierHome>
   // Daily login streak
   String? _lastLoginDate;
   int _loginStreak = 0;
+
+  // Regular customers
+  final Map<String, int> _customerVisits = {};
+
+  // Hourly earnings histogram (0-23)
+  final Map<int, double> _hourlyEarnings = {};
+
+  // Weekly leaderboard
+  List<LeaderboardEntry> _ghostBoard = [];
+  String? _weekStartDate;
+  double _weeklyNet = 0;
+  int _weeklyDeliveries = 0;
 
   // Stacked orders
   Order? _stackedOrder;
@@ -717,6 +779,34 @@ class _CourierHomeState extends State<CourierHome>
       _lastLoginDate = p.getString('lastLoginDate');
       _loginStreak = p.getInt('loginStreak') ?? 0;
 
+      // Regular customers
+      final visitsJson = p.getString('customerVisits');
+      if (visitsJson != null) {
+        final m = jsonDecode(visitsJson) as Map<String, dynamic>;
+        m.forEach((k, v) => _customerVisits[k] = v as int);
+      }
+
+      // Hourly earnings
+      final hourlyJson = p.getString('hourlyEarnings');
+      if (hourlyJson != null) {
+        final m = jsonDecode(hourlyJson) as Map<String, dynamic>;
+        m.forEach((k, v) =>
+            _hourlyEarnings[int.parse(k)] = (v as num).toDouble());
+      }
+
+      // Weekly leaderboard
+      _weekStartDate = p.getString('weekStartDate');
+      _weeklyNet = p.getDouble('weeklyNet') ?? 0;
+      _weeklyDeliveries = p.getInt('weeklyDeliveries') ?? 0;
+      final boardJson = p.getString('ghostBoard');
+      if (boardJson != null) {
+        final list = jsonDecode(boardJson) as List;
+        _ghostBoard = list
+            .map((e) =>
+                LeaderboardEntry.fromJson(e as Map<String, dynamic>))
+            .toList();
+      }
+
       final weeklyJson = p.getString('weekly');
       if (weeklyJson != null) {
         final m = jsonDecode(weeklyJson) as Map<String, dynamic>;
@@ -736,6 +826,47 @@ class _CourierHomeState extends State<CourierHome>
       _loaded = true;
     });
     if (_name != null) _checkDailyLogin();
+    _checkWeekReset();
+  }
+
+  String _currentWeekKey() {
+    final now = DateTime.now();
+    // ISO week-ish: year-week (use day-of-year / 7 approximation)
+    final dayOfYear =
+        now.difference(DateTime(now.year, 1, 1)).inDays + 1;
+    final week = (dayOfYear / 7).ceil();
+    return '${now.year}-W$week';
+  }
+
+  void _checkWeekReset() {
+    final current = _currentWeekKey();
+    if (_weekStartDate == current && _ghostBoard.isNotEmpty) return;
+    setState(() {
+      _weekStartDate = current;
+      _weeklyNet = 0;
+      _weeklyDeliveries = 0;
+      _ghostBoard = _generateGhostBoard();
+    });
+    _saveState();
+    if (_name != null) {
+      _showEventBanner('Nowy tydzień — leaderboard zresetowany', glovoBlue);
+    }
+  }
+
+  List<LeaderboardEntry> _generateGhostBoard() {
+    final names = List<String>.from(_ghostNames);
+    names.shuffle(_rng);
+    return names.take(9).map((n) {
+      final earnings = 60 + _rng.nextDouble() * 280;
+      final deliveries = 8 + _rng.nextInt(40);
+      final lvl = 1 + _rng.nextInt(12);
+      return LeaderboardEntry(
+        name: n,
+        weeklyNet: double.parse(earnings.toStringAsFixed(2)),
+        deliveries: deliveries,
+        level: lvl,
+      );
+    }).toList();
   }
 
   Future<void> _saveState() async {
@@ -768,6 +899,20 @@ class _CourierHomeState extends State<CourierHome>
       await p.setString('lastLoginDate', _lastLoginDate!);
     }
     await p.setInt('loginStreak', _loginStreak);
+    await p.setString('customerVisits', jsonEncode(_customerVisits));
+    await p.setString(
+        'hourlyEarnings',
+        jsonEncode(
+            _hourlyEarnings.map((k, v) => MapEntry(k.toString(), v))));
+    if (_weekStartDate != null) {
+      await p.setString('weekStartDate', _weekStartDate!);
+    }
+    await p.setDouble('weeklyNet', _weeklyNet);
+    await p.setInt('weeklyDeliveries', _weeklyDeliveries);
+    if (_ghostBoard.isNotEmpty) {
+      await p.setString(
+          'ghostBoard', jsonEncode(_ghostBoard.map((e) => e.toJson()).toList()));
+    }
     if (_weekly != null) {
       await p.setString('weekly', jsonEncode(_weekly!.toJson()));
     }
@@ -799,6 +944,12 @@ class _CourierHomeState extends State<CourierHome>
       _maxTipReceived = 0;
       _lastLoginDate = null;
       _loginStreak = 0;
+      _customerVisits.clear();
+      _hourlyEarnings.clear();
+      _ghostBoard = [];
+      _weekStartDate = null;
+      _weeklyNet = 0;
+      _weeklyDeliveries = 0;
       _history.clear();
       _stackedOrder = null;
       _pendingStackOffer = null;
@@ -1112,6 +1263,7 @@ class _CourierHomeState extends State<CourierHome>
         itemCountMax = 1;
     }
     final c = _customers[_rng.nextInt(_customers.length)];
+    final isRegular = (_customerVisits[c.$1] ?? 0) >= 3;
     final itemsCount = 1 + _rng.nextInt(itemCountMax);
     final items = <String>[];
     for (var i = 0; i < itemsCount; i++) {
@@ -1131,7 +1283,7 @@ class _CourierHomeState extends State<CourierHome>
             ? 3 + _rng.nextInt(5)
             : 2 + _rng.nextInt(4);
     if (_ownedGear.contains('vip')) prep = (prep * 0.7).ceil();
-    final willCancel = _rng.nextDouble() < 0.06;
+    final willCancel = !isRegular && _rng.nextDouble() < 0.06;
 
     setState(() {
       _currentOrder = Order(
@@ -1148,6 +1300,7 @@ class _CourierHomeState extends State<CourierHome>
         pickupCode: code,
         prepSeconds: prep,
         willCancel: willCancel,
+        isRegular: isRegular,
       );
       _state = CourierState.orderIncoming;
       _orderCountdown = 15;
@@ -1248,9 +1401,16 @@ class _CourierHomeState extends State<CourierHome>
   }
 
   void _handOver() {
+    HapticFeedback.mediumImpact();
+    setState(() => _state = CourierState.takingPhoto);
+  }
+
+  void _confirmPhoto() {
     final o = _currentOrder!;
-    o.tip = _rollTip(o.adjustedPay);
-    o.customerStars = _rollCustomerStars();
+    o.tip = _rollTip(o);
+    o.customerStars = _rollCustomerStars(o);
+    HapticFeedback.heavyImpact();
+    SystemSound.play(SystemSoundType.click);
     setState(() {
       _state = CourierState.ratingPending;
       _starsRevealed = 0;
@@ -1272,7 +1432,7 @@ class _CourierHomeState extends State<CourierHome>
     });
   }
 
-  double _rollTip(double base) {
+  double _rollTip(Order o) {
     final r = _rng.nextDouble();
     double tip;
     if (r < 0.50) tip = 0;
@@ -1280,11 +1440,13 @@ class _CourierHomeState extends State<CourierHome>
     else if (r < 0.95) tip = 3 + _rng.nextDouble() * 4;
     else tip = 7 + _rng.nextDouble() * 8;
     tip *= _zone.tipMul;
+    if (o.isRegular) tip *= 1.5;
     return double.parse(tip.toStringAsFixed(2));
   }
 
-  int _rollCustomerStars() {
-    final boost = _ownedGear.contains('thermo') ? 0.08 : 0.0;
+  int _rollCustomerStars(Order o) {
+    var boost = _ownedGear.contains('thermo') ? 0.08 : 0.0;
+    if (o.isRegular) boost += 0.12;
     final r = _rng.nextDouble() - boost;
     if (r < 0.78) return 5;
     if (r < 0.93) return 4;
@@ -1338,6 +1500,15 @@ class _CourierHomeState extends State<CourierHome>
       } else {
         _fiveStarStreak = 0;
       }
+      _customerVisits[o.customer] = (_customerVisits[o.customer] ?? 0) + 1;
+      final newCount = _customerVisits[o.customer]!;
+      if (newCount == 3) {
+        _showEventBanner('${o.customer} jest teraz stałym klientem!',
+            glovoPurple);
+      }
+      _hourlyEarnings[_simHour] = (_hourlyEarnings[_simHour] ?? 0) + net;
+      _weeklyNet += net;
+      _weeklyDeliveries++;
       _xp += xpGain;
       while (_xp >= _xpPerLevel) {
         _xp -= _xpPerLevel;
@@ -1632,6 +1803,7 @@ class _CourierHomeState extends State<CourierHome>
         itemCountMax = 1;
     }
     final c = _customers[_rng.nextInt(_customers.length)];
+    final isRegular = (_customerVisits[c.$1] ?? 0) >= 3;
     final itemsCount = 1 + _rng.nextInt(itemCountMax);
     final items = <String>[];
     for (var i = 0; i < itemsCount; i++) {
@@ -1667,6 +1839,7 @@ class _CourierHomeState extends State<CourierHome>
       pickupCode: code,
       prepSeconds: prep,
       willCancel: false,
+      isRegular: isRegular,
     );
   }
 
@@ -1899,6 +2072,9 @@ class _CourierHomeState extends State<CourierHome>
             TextField(
               controller: ctrl,
               maxLength: 20,
+              autocorrect: false,
+              enableSuggestions: false,
+              textCapitalization: TextCapitalization.words,
               style: const TextStyle(color: Colors.white, fontSize: 16),
               cursorColor: glovoYellow,
               decoration: InputDecoration(
@@ -2379,11 +2555,130 @@ class _CourierHomeState extends State<CourierHome>
         return _cancelledView();
       case CourierState.atCustomer:
         return _atCustomerView();
+      case CourierState.takingPhoto:
+        return _photoView();
       case CourierState.ratingPending:
         return _ratingView();
       case CourierState.delivered:
         return _deliveredView();
     }
+  }
+
+  Widget _photoView() {
+    final o = _currentOrder!;
+    return Container(
+      color: Colors.black,
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                const Icon(Icons.photo_camera_rounded,
+                    color: Colors.white, size: 18),
+                const SizedBox(width: 8),
+                const Text('Photo proof',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 14)),
+                const Spacer(),
+                Text(o.customer,
+                    style: const TextStyle(
+                        color: Colors.white70, fontSize: 12)),
+              ],
+            ),
+          ),
+          Expanded(
+            child: Stack(
+              children: [
+                Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF101218),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.1)),
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: AnimatedBuilder(
+                      animation: _pulseCtrl,
+                      builder: (_, _) => CustomPaint(
+                        painter:
+                            _DoorPainter(time: _pulseCtrl.value),
+                        child: const SizedBox.expand(),
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned.fill(
+                  child: Center(
+                    child: Container(
+                      width: 220,
+                      height: 220,
+                      decoration: BoxDecoration(
+                        border: Border.all(
+                            color: Colors.white70, width: 2),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Stack(
+                        children: const [
+                          Positioned(
+                              top: -2,
+                              left: -2,
+                              child: _Corner(top: true, left: true)),
+                          Positioned(
+                              top: -2,
+                              right: -2,
+                              child: _Corner(top: true, left: false)),
+                          Positioned(
+                              bottom: -2,
+                              left: -2,
+                              child: _Corner(top: false, left: true)),
+                          Positioned(
+                              bottom: -2,
+                              right: -2,
+                              child: _Corner(top: false, left: false)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  bottom: 18,
+                  left: 16,
+                  right: 16,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: Colors.black54,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.info_outline,
+                            color: Colors.white, size: 14),
+                        SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                              'Sfotografuj zamówienie pod drzwiami klienta',
+                              style: TextStyle(
+                                  color: Colors.white, fontSize: 12)),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
+      ),
+    );
   }
 
   // ===== STATS TAB =====
@@ -2443,6 +2738,19 @@ class _CourierHomeState extends State<CourierHome>
         const SizedBox(height: 24),
         Row(
           children: [
+            const Icon(Icons.bar_chart_rounded,
+                color: glovoYellow, size: 18),
+            const SizedBox(width: 6),
+            const Text('Zarobki wg godziny',
+                style:
+                    TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+          ],
+        ),
+        const SizedBox(height: 8),
+        _buildHourlyHistogram(),
+        const SizedBox(height: 24),
+        Row(
+          children: [
             const Icon(Icons.history_rounded, color: glovoYellow, size: 18),
             const SizedBox(width: 6),
             Text('Historia dostaw (${_history.length})',
@@ -2491,6 +2799,99 @@ class _CourierHomeState extends State<CourierHome>
                 style: const TextStyle(color: glovoMuted, fontSize: 11)),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildHourlyHistogram() {
+    if (_hourlyEarnings.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: glovoCard,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Center(
+          child: Text('Wykonaj kilka dostaw, by zobaczyć rozkład zarobków',
+              style: TextStyle(color: glovoMuted, fontSize: 12)),
+        ),
+      );
+    }
+    final maxVal = _hourlyEarnings.values.reduce(max);
+    final bestHour =
+        _hourlyEarnings.entries.reduce((a, b) => a.value > b.value ? a : b);
+    final totalSum = _hourlyEarnings.values.reduce((a, b) => a + b);
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: glovoCard,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.star_rate_rounded,
+                  color: glovoYellow, size: 14),
+              const SizedBox(width: 4),
+              Text(
+                  'Najlepsza godzina: ${bestHour.key.toString().padLeft(2, '0')}:00 — ${bestHour.value.toStringAsFixed(2)} zł',
+                  style: const TextStyle(fontSize: 12)),
+              const Spacer(),
+              Text('Łącznie: ${totalSum.toStringAsFixed(0)} zł',
+                  style: const TextStyle(
+                      color: glovoMuted, fontSize: 11)),
+            ],
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            height: 110,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: List.generate(24, (h) {
+                final v = _hourlyEarnings[h] ?? 0;
+                final barHeight = maxVal == 0 ? 0.0 : (v / maxVal) * 90;
+                final isPeak = (h >= 11 && h < 14) ||
+                    (h >= 18 && h < 22);
+                return Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 1),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        Container(
+                          height: barHeight,
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.bottomCenter,
+                              end: Alignment.topCenter,
+                              colors: [
+                                isPeak ? glovoOrange : glovoYellow,
+                                isPeak
+                                    ? glovoRed
+                                    : glovoYellow.withValues(alpha: 0.6),
+                              ],
+                            ),
+                            borderRadius:
+                                BorderRadius.circular(2),
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        if (h % 4 == 0)
+                          Text(h.toString().padLeft(2, '0'),
+                              style: const TextStyle(
+                                  color: glovoMuted, fontSize: 8))
+                        else
+                          const SizedBox(height: 9),
+                      ],
+                    ),
+                  ),
+                );
+              }),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -2936,6 +3337,39 @@ class _CourierHomeState extends State<CourierHome>
           const SizedBox(height: 18),
         ],
 
+        // ===== Leaderboard =====
+        Row(
+          children: [
+            const Icon(Icons.leaderboard_rounded,
+                color: glovoBlue, size: 18),
+            const SizedBox(width: 6),
+            const Text('Leaderboard tygodniowy',
+                style:
+                    TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+          ],
+        ),
+        const SizedBox(height: 8),
+        _buildLeaderboard(),
+        const SizedBox(height: 18),
+
+        // ===== Regular customers =====
+        if (_customerVisits.isNotEmpty) ...[
+          Row(
+            children: [
+              const Icon(Icons.favorite_rounded,
+                  color: glovoPurple, size: 18),
+              const SizedBox(width: 6),
+              Text(
+                  'Stali klienci (${_customerVisits.values.where((v) => v >= 3).length})',
+                  style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+            ],
+          ),
+          const SizedBox(height: 8),
+          _buildRegulars(),
+          const SizedBox(height: 18),
+        ],
+
         // ===== Zones =====
         Row(
           children: [
@@ -2978,6 +3412,186 @@ class _CourierHomeState extends State<CourierHome>
         ),
         const SizedBox(height: 80),
       ],
+    );
+  }
+
+  Widget _buildLeaderboard() {
+    final playerEntry = LeaderboardEntry(
+      name: _name ?? 'Ty',
+      weeklyNet: _weeklyNet,
+      deliveries: _weeklyDeliveries,
+      level: _level,
+      isPlayer: true,
+    );
+    final all = [..._ghostBoard, playerEntry];
+    all.sort((a, b) => b.weeklyNet.compareTo(a.weeklyNet));
+    final myRank = all.indexWhere((e) => e.isPlayer) + 1;
+    return Column(
+      children: [
+        Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.symmetric(
+              horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: glovoBlue.withValues(alpha: 0.18),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.emoji_events_rounded,
+                  color: glovoBlue, size: 16),
+              const SizedBox(width: 6),
+              Text('Twoje miejsce: #$myRank z ${all.length}',
+                  style: const TextStyle(
+                      color: glovoBlue,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800)),
+            ],
+          ),
+        ),
+        ...List.generate(all.length, (i) {
+          final e = all[i];
+          final rank = i + 1;
+          final isPodium = rank <= 3;
+          final medal = rank == 1
+              ? '🥇'
+              : rank == 2
+                  ? '🥈'
+                  : rank == 3
+                      ? '🥉'
+                      : '';
+          return Container(
+            margin: const EdgeInsets.only(bottom: 4),
+            padding: const EdgeInsets.symmetric(
+                horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: e.isPlayer
+                  ? glovoYellow.withValues(alpha: 0.15)
+                  : glovoCard,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: e.isPlayer ? glovoYellow : Colors.transparent,
+                width: 1,
+              ),
+            ),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 28,
+                  child: isPodium
+                      ? Text(medal,
+                          style: const TextStyle(fontSize: 18),
+                          textAlign: TextAlign.center)
+                      : Text('$rank',
+                          style: const TextStyle(
+                              color: glovoMuted,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 13),
+                          textAlign: TextAlign.center),
+                ),
+                const SizedBox(width: 6),
+                Container(
+                  width: 26,
+                  height: 26,
+                  decoration: BoxDecoration(
+                    color:
+                        e.isPlayer ? glovoYellow : glovoCardLight,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Center(
+                    child: Text('${e.level}',
+                        style: TextStyle(
+                            color: e.isPlayer
+                                ? glovoDark
+                                : glovoMuted,
+                            fontWeight: FontWeight.w900,
+                            fontSize: 11)),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(e.name,
+                      style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13,
+                          color: e.isPlayer
+                              ? glovoYellow
+                              : Colors.white)),
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text('${e.weeklyNet.toStringAsFixed(2)} zł',
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            color: glovoGreen,
+                            fontSize: 13)),
+                    Text('${e.deliveries} dostaw',
+                        style: const TextStyle(
+                            color: glovoMuted, fontSize: 10)),
+                  ],
+                ),
+              ],
+            ),
+          );
+        }),
+      ],
+    );
+  }
+
+  Widget _buildRegulars() {
+    final regulars = _customerVisits.entries
+        .where((e) => e.value >= 3)
+        .toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    if (regulars.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: glovoCard,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Text(
+            'Obsłuż klienta 3 razy, by stał się stałym klientem (+50% napiwek, +12% szansy 5★)',
+            style: TextStyle(color: glovoMuted, fontSize: 12)),
+      );
+    }
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: glovoCard,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        children: regulars.map((e) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Row(
+              children: [
+                Container(
+                  width: 30,
+                  height: 30,
+                  decoration: BoxDecoration(
+                    color: glovoPurple.withValues(alpha: 0.2),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.favorite_rounded,
+                      color: glovoPurple, size: 16),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(e.key,
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w700, fontSize: 13)),
+                ),
+                Text('${e.value}× zamówień',
+                    style: const TextStyle(
+                        color: glovoMuted, fontSize: 12)),
+              ],
+            ),
+          );
+        }).toList(),
+      ),
     );
   }
 
@@ -3544,6 +4158,30 @@ class _CourierHomeState extends State<CourierHome>
                   ],
                 ),
               ),
+              if (o.isRegular) ...[
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: glovoPurple.withValues(alpha: 0.18),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.favorite_rounded,
+                          color: glovoPurple, size: 14),
+                      const SizedBox(width: 4),
+                      const Text('Stały klient',
+                          style: TextStyle(
+                              color: glovoPurple,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 12)),
+                    ],
+                  ),
+                ),
+              ],
             ],
           ),
           const SizedBox(height: 12),
@@ -4358,11 +4996,19 @@ class _CourierHomeState extends State<CourierHome>
         );
       case CourierState.atCustomer:
         return _bigButton(
-          label: 'Wręczyłem zamówienie',
+          label: 'Zostawiłem zamówienie',
           icon: Icons.done_all_rounded,
           color: glovoGreen,
           textColor: Colors.white,
           onTap: _handOver,
+        );
+      case CourierState.takingPhoto:
+        return _bigButton(
+          label: 'Zrób zdjęcie',
+          icon: Icons.camera_alt_rounded,
+          color: Colors.white,
+          textColor: glovoDark,
+          onTap: _confirmPhoto,
         );
       case CourierState.ratingPending:
         return _bigButton(
@@ -4540,4 +5186,148 @@ class _MapPainter extends CustomPainter {
       old.pinColor != pinColor ||
       old.weather != weather ||
       old.rainPhase != rainPhase;
+}
+
+class _Corner extends StatelessWidget {
+  final bool top;
+  final bool left;
+  const _Corner({required this.top, required this.left});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 22,
+      height: 22,
+      child: CustomPaint(
+        painter: _CornerPainter(top: top, left: left),
+      ),
+    );
+  }
+}
+
+class _CornerPainter extends CustomPainter {
+  final bool top;
+  final bool left;
+  _CornerPainter({required this.top, required this.left});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final p = Paint()
+      ..color = glovoYellow
+      ..strokeWidth = 4
+      ..strokeCap = StrokeCap.round;
+    final hStart =
+        left ? const Offset(0, 0) : Offset(size.width, 0);
+    final hEnd = left
+        ? Offset(size.width * 0.6, 0)
+        : Offset(size.width * 0.4, 0);
+    final hStart2 = top ? hStart : Offset(hStart.dx, size.height);
+    final hEnd2 = top ? hEnd : Offset(hEnd.dx, size.height);
+    canvas.drawLine(hStart2, hEnd2, p);
+
+    final vStart = top ? hStart2 : Offset(hStart2.dx, size.height);
+    final vEnd =
+        top ? Offset(hStart2.dx, size.height * 0.6) : Offset(hStart2.dx, size.height * 0.4);
+    canvas.drawLine(vStart, vEnd, p);
+  }
+
+  @override
+  bool shouldRepaint(covariant _CornerPainter old) => false;
+}
+
+class _DoorPainter extends CustomPainter {
+  final double time;
+  _DoorPainter({required this.time});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final bg = Paint()..color = const Color(0xFF1A1F2A);
+    canvas.drawRect(Offset.zero & size, bg);
+
+    // Floor line
+    final floorY = size.height * 0.78;
+    canvas.drawRect(
+        Rect.fromLTWH(0, floorY, size.width, size.height - floorY),
+        Paint()..color = const Color(0xFF20262F));
+
+    // Door
+    final doorW = size.width * 0.42;
+    final doorH = size.height * 0.65;
+    final doorX = (size.width - doorW) / 2;
+    final doorY = floorY - doorH;
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+          Rect.fromLTWH(doorX, doorY, doorW, doorH),
+          const Radius.circular(6)),
+      Paint()..color = const Color(0xFF3A2D1E),
+    );
+    // Door panels
+    final panelPaint = Paint()
+      ..color = const Color(0xFF2C2218)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2;
+    final inset = 12.0;
+    canvas.drawRect(
+      Rect.fromLTWH(doorX + inset, doorY + inset,
+          doorW - inset * 2, doorH * 0.35),
+      panelPaint,
+    );
+    canvas.drawRect(
+      Rect.fromLTWH(
+          doorX + inset,
+          doorY + doorH * 0.45 + inset,
+          doorW - inset * 2,
+          doorH * 0.45),
+      panelPaint,
+    );
+    // Knob
+    canvas.drawCircle(
+      Offset(doorX + doorW - 14, doorY + doorH * 0.5),
+      4,
+      Paint()..color = const Color(0xFFC9A36A),
+    );
+
+    // Doormat
+    canvas.drawRect(
+      Rect.fromLTWH(doorX - 18, floorY - 10, doorW + 36, 12),
+      Paint()..color = const Color(0xFF4A3F35),
+    );
+
+    // Bag (the order)
+    final bagX = size.width / 2 - 28;
+    final bagY = floorY - 50;
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+          Rect.fromLTWH(bagX, bagY, 56, 50),
+          const Radius.circular(8)),
+      Paint()..color = glovoYellow,
+    );
+    final tp = TextPainter(
+      text: const TextSpan(
+        text: 'glovo',
+        style: TextStyle(
+          color: glovoDark,
+          fontSize: 11,
+          fontWeight: FontWeight.w900,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    tp.paint(canvas, Offset(bagX + 28 - tp.width / 2, bagY + 18));
+
+    // Bag handle
+    canvas.drawArc(
+      Rect.fromLTWH(bagX + 14, bagY - 14, 28, 18),
+      3.14,
+      3.14,
+      false,
+      Paint()
+        ..color = glovoYellow
+        ..strokeWidth = 3
+        ..style = PaintingStyle.stroke,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _DoorPainter old) => old.time != time;
 }
