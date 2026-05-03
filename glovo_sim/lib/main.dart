@@ -539,6 +539,113 @@ const _ghostNames = [
   'Maja Ż.',
 ];
 
+enum Season {
+  spring('Wiosna', '🌷', Color(0xFF7BC97D)),
+  summer('Lato', '☀️', Color(0xFFFFB940)),
+  autumn('Jesień', '🍂', Color(0xFFD46B2A)),
+  winter('Zima', '❄️', Color(0xFF6BB7E0));
+
+  final String label;
+  final String emoji;
+  final Color color;
+  const Season(this.label, this.emoji, this.color);
+
+  static Season currentForDate(DateTime now) {
+    final m = now.month;
+    if (m >= 3 && m <= 5) return Season.spring;
+    if (m >= 6 && m <= 8) return Season.summer;
+    if (m >= 9 && m <= 11) return Season.autumn;
+    return Season.winter;
+  }
+}
+
+class ChatMessage {
+  final String from; // "customer" or "courier"
+  final String text;
+  final int simHour;
+  ChatMessage(this.from, this.text, this.simHour);
+}
+
+const Map<String, String> _itemEmojis = {
+  'Big Mac': '🍔',
+  'Cheeseburger': '🍔',
+  'Whopper': '🍔',
+  'McNuggets 9 szt.': '🍗',
+  'Frytki duże': '🍟',
+  'Coca-Cola 0.5L': '🥤',
+  'Coca-Cola 2L': '🥤',
+  'Pizza Pepperoni': '🍕',
+  'Sushi Set 24': '🍣',
+  'Pad Thai': '🍜',
+  'Kebab XL': '🌯',
+  'Lody McFlurry': '🍦',
+  'Burrito': '🌯',
+  'Sałatka Cezar': '🥗',
+  'Tortilla': '🌯',
+  'Mleko 1L': '🥛',
+  'Chleb pszenny': '🍞',
+  'Jajka 10 szt.': '🥚',
+  'Banany 1kg': '🍌',
+  'Masło 200g': '🧈',
+  'Kurczak 1kg': '🍗',
+  'Pomidory 1kg': '🍅',
+  'Płyn do mycia': '🧴',
+  'Papier toaletowy 8 rolek': '🧻',
+  'Ser żółty 500g': '🧀',
+  'Jogurt 4-pak': '🥛',
+  'Marchew 1kg': '🥕',
+  'Cebula 1kg': '🧅',
+  'Paracetamol 500mg': '💊',
+  'Ibuprom MAX': '💊',
+  'Witamina D3 4000': '💊',
+  'Plastry 20szt': '🩹',
+  'Bandaż elastyczny': '🩹',
+  'Krople do oczu': '💧',
+  'Maseczki FFP2 5szt': '😷',
+  'Termometr elektroniczny': '🌡️',
+  'Aspiryn C': '💊',
+  'Syrop na kaszel': '🧪',
+  'Paczka A4 (księgowa)': '📦',
+  'Bukiet różowych róż': '🌹',
+  'Klucze (przekazanie)': '🔑',
+  'Zapomniany laptop': '💻',
+  'Kostium na wieczór': '🎭',
+  'Prezent niespodzianka': '🎁',
+  'Dokumenty firmowe': '📄',
+  'Lekarstwo babci': '💊',
+  // Seasonal
+  'Gorąca czekolada': '☕',
+  'Pączek z różą': '🍩',
+  'Grzaniec': '🍷',
+  'Pierogi ruskie': '🥟',
+  'Lody na patyku': '🍦',
+  'Mrożona herbata': '🧊',
+  'Arbuz 1kg': '🍉',
+  'Lemoniada': '🍋',
+};
+
+String emojiForItem(String name) {
+  return _itemEmojis[name] ?? '🍽️';
+}
+
+const _customerMessageTemplates = [
+  'Cześć! Mieszkam na 3 piętrze, klatka B, numer 14',
+  'Czy może Pan zostawić zamówienie pod drzwiami? Dziecko śpi.',
+  'Brama jest otwarta, prosto do windy.',
+  'Daleko jeszcze? :)',
+  'Proszę zadzwonić domofonem 14',
+  'Mam pieska, nie martw się — nie gryzie',
+  'Proszę uważać, są schody',
+  'Dziękuję, że jedziesz w taką pogodę!',
+  'Czy mogę poprosić o dodatkowy ketchup, jeśli zostało?',
+];
+
+const _customerQuickReplies = [
+  'OK, jasne 👍',
+  'Już jadę, 5 min',
+  'Niestety nie da rady',
+];
+
 enum CourierState {
   offline,
   searching,
@@ -656,6 +763,20 @@ class _CourierHomeState extends State<CourierHome>
   Timer? _knockTimer;
   Timer? _customerCallTimer;
 
+  // Chat
+  final List<ChatMessage> _chat = [];
+  bool _chatBadgeUnread = false;
+  bool _chatOpen = false;
+  bool _chatTriggered = false;
+  Timer? _chatScheduleTimer;
+
+  // Tutorial
+  bool _tutorialSeen = false;
+  int _tutorialPage = 0;
+
+  // Season
+  late Season _season;
+
   final List<CompletedDelivery> _history = [];
   late List<Goal> _goals;
   double _bestTip = 0;
@@ -750,6 +871,7 @@ class _CourierHomeState extends State<CourierHome>
       duration: const Duration(milliseconds: 800),
     )..repeat();
     _goals = _generateDailyGoals();
+    _season = Season.currentForDate(DateTime.now());
     _loadState();
   }
 
@@ -800,6 +922,7 @@ class _CourierHomeState extends State<CourierHome>
       }
       _lastLoginDate = p.getString('lastLoginDate');
       _loginStreak = p.getInt('loginStreak') ?? 0;
+      _tutorialSeen = p.getBool('tutorialSeen') ?? false;
 
       // Regular customers
       final visitsJson = p.getString('customerVisits');
@@ -921,6 +1044,7 @@ class _CourierHomeState extends State<CourierHome>
       await p.setString('lastLoginDate', _lastLoginDate!);
     }
     await p.setInt('loginStreak', _loginStreak);
+    await p.setBool('tutorialSeen', _tutorialSeen);
     await p.setString('customerVisits', jsonEncode(_customerVisits));
     await p.setString(
         'hourlyEarnings',
@@ -966,6 +1090,7 @@ class _CourierHomeState extends State<CourierHome>
       _maxTipReceived = 0;
       _lastLoginDate = null;
       _loginStreak = 0;
+      _tutorialSeen = false;
       _customerVisits.clear();
       _hourlyEarnings.clear();
       _ghostBoard = [];
@@ -1016,6 +1141,7 @@ class _CourierHomeState extends State<CourierHome>
     _stackOfferTimer?.cancel();
     _knockTimer?.cancel();
     _customerCallTimer?.cancel();
+    _chatScheduleTimer?.cancel();
     super.dispose();
   }
 
@@ -1076,31 +1202,106 @@ class _CourierHomeState extends State<CourierHome>
 
   void _maybeChangeWeather() {
     final r = _rng.nextDouble();
-    final transitions = {
-      Weather.sunny: [
-        (Weather.sunny, 0.5),
-        (Weather.cloudy, 0.45),
-        (Weather.rainy, 0.05),
-      ],
-      Weather.cloudy: [
-        (Weather.sunny, 0.3),
-        (Weather.cloudy, 0.35),
-        (Weather.rainy, 0.30),
-        (Weather.heavyRain, 0.05),
-      ],
-      Weather.rainy: [
-        (Weather.cloudy, 0.5),
-        (Weather.rainy, 0.3),
-        (Weather.heavyRain, 0.15),
-        (Weather.sunny, 0.05),
-      ],
-      Weather.heavyRain: [
-        (Weather.rainy, 0.6),
-        (Weather.cloudy, 0.3),
-        (Weather.heavyRain, 0.1),
-      ],
-    };
-    final list = transitions[_weather]!;
+    Map<Weather, List<(Weather, double)>> base;
+    switch (_season) {
+      case Season.summer:
+        base = {
+          Weather.sunny: [
+            (Weather.sunny, 0.7),
+            (Weather.cloudy, 0.27),
+            (Weather.rainy, 0.03),
+          ],
+          Weather.cloudy: [
+            (Weather.sunny, 0.55),
+            (Weather.cloudy, 0.35),
+            (Weather.rainy, 0.10),
+          ],
+          Weather.rainy: [
+            (Weather.cloudy, 0.55),
+            (Weather.sunny, 0.30),
+            (Weather.rainy, 0.15),
+          ],
+          Weather.heavyRain: [
+            (Weather.rainy, 0.55),
+            (Weather.cloudy, 0.40),
+            (Weather.heavyRain, 0.05),
+          ],
+        };
+      case Season.winter:
+        base = {
+          Weather.sunny: [
+            (Weather.cloudy, 0.5),
+            (Weather.sunny, 0.35),
+            (Weather.rainy, 0.15),
+          ],
+          Weather.cloudy: [
+            (Weather.sunny, 0.15),
+            (Weather.cloudy, 0.35),
+            (Weather.rainy, 0.40),
+            (Weather.heavyRain, 0.10),
+          ],
+          Weather.rainy: [
+            (Weather.cloudy, 0.30),
+            (Weather.rainy, 0.40),
+            (Weather.heavyRain, 0.30),
+          ],
+          Weather.heavyRain: [
+            (Weather.rainy, 0.50),
+            (Weather.heavyRain, 0.30),
+            (Weather.cloudy, 0.20),
+          ],
+        };
+      case Season.autumn:
+        base = {
+          Weather.sunny: [
+            (Weather.sunny, 0.30),
+            (Weather.cloudy, 0.55),
+            (Weather.rainy, 0.15),
+          ],
+          Weather.cloudy: [
+            (Weather.sunny, 0.20),
+            (Weather.cloudy, 0.40),
+            (Weather.rainy, 0.35),
+            (Weather.heavyRain, 0.05),
+          ],
+          Weather.rainy: [
+            (Weather.cloudy, 0.50),
+            (Weather.rainy, 0.30),
+            (Weather.heavyRain, 0.15),
+            (Weather.sunny, 0.05),
+          ],
+          Weather.heavyRain: [
+            (Weather.rainy, 0.6),
+            (Weather.cloudy, 0.3),
+            (Weather.heavyRain, 0.1),
+          ],
+        };
+      case Season.spring:
+        base = {
+          Weather.sunny: [
+            (Weather.sunny, 0.5),
+            (Weather.cloudy, 0.40),
+            (Weather.rainy, 0.10),
+          ],
+          Weather.cloudy: [
+            (Weather.sunny, 0.4),
+            (Weather.cloudy, 0.35),
+            (Weather.rainy, 0.25),
+          ],
+          Weather.rainy: [
+            (Weather.cloudy, 0.5),
+            (Weather.rainy, 0.3),
+            (Weather.heavyRain, 0.15),
+            (Weather.sunny, 0.05),
+          ],
+          Weather.heavyRain: [
+            (Weather.rainy, 0.6),
+            (Weather.cloudy, 0.3),
+            (Weather.heavyRain, 0.1),
+          ],
+        };
+    }
+    final list = base[_weather]!;
     double acc = 0;
     for (final (w, p) in list) {
       acc += p;
@@ -1111,6 +1312,27 @@ class _CourierHomeState extends State<CourierHome>
         _weather = w;
         return;
       }
+    }
+  }
+
+  List<String> _seasonalItemsFor(OrderCategory cat) {
+    switch (cat) {
+      case OrderCategory.food:
+        switch (_season) {
+          case Season.winter:
+            return ['Gorąca czekolada', 'Pierogi ruskie', 'Grzaniec'];
+          case Season.summer:
+            return ['Lody na patyku', 'Mrożona herbata', 'Lemoniada'];
+          case Season.autumn:
+            return ['Pączek z różą', 'Gorąca czekolada'];
+          case Season.spring:
+            return ['Lemoniada', 'Pączek z różą'];
+        }
+      case OrderCategory.grocery:
+        if (_season == Season.summer) return ['Arbuz 1kg', 'Lemoniada'];
+        return [];
+      default:
+        return [];
     }
   }
 
@@ -1289,9 +1511,11 @@ class _CourierHomeState extends State<CourierHome>
     final c = _customers[_rng.nextInt(_customers.length)];
     final isRegular = (_customerVisits[c.$1] ?? 0) >= 3;
     final itemsCount = 1 + _rng.nextInt(itemCountMax);
+    final seasonalPool = _seasonalItemsFor(cat);
+    final fullPool = [...pool, ...seasonalPool, ...seasonalPool]; // boost seasonal weight
     final items = <String>[];
     for (var i = 0; i < itemsCount; i++) {
-      items.add(pool[_rng.nextInt(pool.length)]);
+      items.add(fullPool[_rng.nextInt(fullPool.length)]);
     }
     final dist = 0.6 + _rng.nextDouble() * 3.4;
     var basePay = 5.50 + dist * 2.10 + _rng.nextDouble() * 1.5;
@@ -1474,8 +1698,41 @@ class _CourierHomeState extends State<CourierHome>
       _state = CourierState.toCustomer;
       _routeProgress = 0;
       _itemsChecked.clear();
+      _chat.clear();
+      _chatTriggered = false;
+      _chatBadgeUnread = false;
+      _chatOpen = false;
     });
     _runRoute(onComplete: _onArriveAtCustomer);
+  }
+
+  void _customerSendsMessage() {
+    final msg = _customerMessageTemplates[
+        _rng.nextInt(_customerMessageTemplates.length)];
+    setState(() {
+      _chat.add(ChatMessage('customer', msg, _simHour));
+      if (!_chatOpen) _chatBadgeUnread = true;
+    });
+    HapticFeedback.mediumImpact();
+    SystemSound.play(SystemSoundType.alert);
+    if (!_chatOpen) {
+      _showEventBanner('${_currentOrder?.customer ?? "Klient"}: nowa wiadomość',
+          glovoBlue);
+    }
+  }
+
+  void _courierReply(String text) {
+    setState(() {
+      _chat.add(ChatMessage('courier', text, _simHour));
+    });
+    HapticFeedback.lightImpact();
+  }
+
+  void _toggleChat() {
+    setState(() {
+      _chatOpen = !_chatOpen;
+      if (_chatOpen) _chatBadgeUnread = false;
+    });
   }
 
   // ===== CUSTOMER ARRIVAL =====
@@ -2130,6 +2387,15 @@ class _CourierHomeState extends State<CourierHome>
           step % 10 == 0) {
         _maybeOfferStack();
       }
+      // Customer chat: trigger once between 25-60% of toCustomer route
+      if (_state == CourierState.toCustomer &&
+          !_chatTriggered &&
+          step > totalSteps * 0.25 &&
+          step < totalSteps * 0.60 &&
+          _rng.nextDouble() < 0.06) {
+        _chatTriggered = true;
+        _customerSendsMessage();
+      }
       // Random events during route
       if (!trafficTriggered &&
           step > totalSteps * 0.25 &&
@@ -2242,6 +2508,9 @@ class _CourierHomeState extends State<CourierHome>
         ),
       );
     }
+    if (!_tutorialSeen) {
+      return Scaffold(body: SafeArea(child: _tutorialView()));
+    }
     if (_name == null) {
       return Scaffold(body: SafeArea(child: _onboardingView()));
     }
@@ -2256,6 +2525,140 @@ class _CourierHomeState extends State<CourierHome>
             _buildBottomNav(),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _tutorialView() {
+    final pages = [
+      (
+        '🛵',
+        'Witaj w Glovo Sim',
+        'Wciel się w rolę kuriera. Akceptuj zamówienia, jedź do restauracji, dostarczaj klientom i zarabiaj.',
+      ),
+      (
+        '🔥',
+        'Peak hours i pogoda',
+        'W godziny szczytu (lunch 11–14, kolacja 18–22) jest więcej zamówień i wyższe stawki. Deszcz dodaje bonus pieniężny.',
+      ),
+      (
+        '🛒',
+        'Wyposażenie i awanse',
+        'Kupuj wyposażenie z zarobionych pieniędzy: termo-torba, GPS, płaszcz przeciwdeszczowy. Każda dostawa daje XP i awanse.',
+      ),
+      (
+        '🏆',
+        'Cele i odznaki',
+        'Wykonuj cele dzienne i tygodniowe wyzwanie. Zdobywaj odznaki za kamienie milowe. Konkuruj z innymi kurierami w leaderboardzie.',
+      ),
+    ];
+    final isLast = _tutorialPage == pages.length - 1;
+    return Padding(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        children: [
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: () async {
+                setState(() => _tutorialSeen = true);
+                await _saveState();
+              },
+              child: const Text('Pomiń',
+                  style:
+                      TextStyle(color: glovoMuted, fontSize: 13)),
+            ),
+          ),
+          Expanded(
+            child: PageView.builder(
+              itemCount: pages.length,
+              controller: PageController(initialPage: _tutorialPage),
+              onPageChanged: (i) => setState(() => _tutorialPage = i),
+              itemBuilder: (_, i) {
+                final p = pages[i];
+                return Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Container(
+                        width: 130,
+                        height: 130,
+                        decoration: BoxDecoration(
+                          color:
+                              glovoYellow.withValues(alpha: 0.18),
+                          shape: BoxShape.circle,
+                        ),
+                        alignment: Alignment.center,
+                        child: Text(p.$1,
+                            style: const TextStyle(fontSize: 70)),
+                      ),
+                      const SizedBox(height: 28),
+                      Text(p.$2,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                              fontSize: 24,
+                              fontWeight: FontWeight.w900)),
+                      const SizedBox(height: 14),
+                      Text(p.$3,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                              color: glovoMuted,
+                              fontSize: 14,
+                              height: 1.5)),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(pages.length, (i) {
+                final active = i == _tutorialPage;
+                return AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  margin: const EdgeInsets.symmetric(horizontal: 4),
+                  width: active ? 22 : 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: active ? glovoYellow : glovoCardLight,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                );
+              }),
+            ),
+          ),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: () async {
+                if (isLast) {
+                  setState(() => _tutorialSeen = true);
+                  await _saveState();
+                } else {
+                  setState(() => _tutorialPage++);
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: glovoYellow,
+                foregroundColor: glovoDark,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              child: Text(isLast ? 'Zaczynam!' : 'Dalej',
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w800, fontSize: 16)),
+            ),
+          ),
+          const SizedBox(height: 10),
+        ],
       ),
     );
   }
@@ -2654,8 +3057,10 @@ class _CourierHomeState extends State<CourierHome>
                   ],
                 ),
               ),
+              _seasonChip(),
+              const SizedBox(width: 6),
               if (online) _weatherChip(),
-              const SizedBox(width: 8),
+              const SizedBox(width: 6),
               if (online) _clockChip(),
             ],
           ),
@@ -2692,6 +3097,28 @@ class _CourierHomeState extends State<CourierHome>
                   _formatTime(_onlineSeconds), 'Czas'),
             ],
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _seasonChip() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+      decoration: BoxDecoration(
+        color: _season.color.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(_season.emoji, style: const TextStyle(fontSize: 12)),
+          const SizedBox(width: 3),
+          Text(_season.label,
+              style: TextStyle(
+                  color: _season.color,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 10)),
         ],
       ),
     );
@@ -4521,9 +4948,9 @@ class _CourierHomeState extends State<CourierHome>
                 Align(
                   alignment: Alignment.centerLeft,
                   child: Text(
-                    o.items.map((e) => '• $e').join('\n'),
+                    o.items.map((e) => '${emojiForItem(e)}  $e').join('\n'),
                     style: const TextStyle(
-                        color: glovoMuted, fontSize: 13, height: 1.5),
+                        color: glovoMuted, fontSize: 13, height: 1.7),
                   ),
                 ),
               ],
@@ -4649,7 +5076,14 @@ class _CourierHomeState extends State<CourierHome>
                   left: 10,
                   child: _speedometer(),
                 ),
+                if (_state == CourierState.toCustomer && _chat.isNotEmpty)
+                  Positioned(
+                    bottom: 10,
+                    right: 10,
+                    child: _chatBubbleButton(),
+                  ),
                 if (_trafficLightActive) _trafficLightOverlay(),
+                if (_chatOpen) _chatOverlay(),
               ],
             ),
           ),
@@ -4729,6 +5163,199 @@ class _CourierHomeState extends State<CourierHome>
         if (_stackOfferActive && _pendingStackOffer != null)
           _buildStackOfferOverlay(_pendingStackOffer!),
       ],
+    );
+  }
+
+  Widget _chatBubbleButton() {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: _toggleChat,
+        borderRadius: BorderRadius.circular(28),
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: glovoBlue,
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: glovoBlue.withValues(alpha: 0.4),
+                    blurRadius: 12,
+                  ),
+                ],
+              ),
+              child: const Icon(Icons.chat_bubble_rounded,
+                  color: Colors.white, size: 22),
+            ),
+            if (_chatBadgeUnread)
+              Positioned(
+                top: -2,
+                right: -2,
+                child: Container(
+                  width: 14,
+                  height: 14,
+                  decoration: BoxDecoration(
+                    color: glovoRed,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: glovoDark, width: 2),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _chatOverlay() {
+    final o = _currentOrder;
+    return Positioned.fill(
+      child: GestureDetector(
+        onTap: _toggleChat,
+        child: Container(
+          color: Colors.black54,
+          child: Align(
+            alignment: Alignment.bottomCenter,
+            child: GestureDetector(
+              onTap: () {},
+              child: Container(
+                margin: const EdgeInsets.all(12),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: glovoCard,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 36,
+                          height: 36,
+                          decoration: BoxDecoration(
+                            color: glovoPurple.withValues(alpha: 0.18),
+                            shape: BoxShape.circle,
+                          ),
+                          alignment: Alignment.center,
+                          child: Text((o?.customer ?? '?')[0],
+                              style: const TextStyle(
+                                  color: glovoPurple,
+                                  fontWeight: FontWeight.w900)),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment:
+                                CrossAxisAlignment.start,
+                            children: [
+                              Text(o?.customer ?? '',
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.w800)),
+                              const Text('online',
+                                  style: TextStyle(
+                                      color: glovoGreen,
+                                      fontSize: 11)),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close_rounded,
+                              color: glovoMuted),
+                          onPressed: _toggleChat,
+                        ),
+                      ],
+                    ),
+                    const Divider(color: glovoCardLight, height: 16),
+                    SizedBox(
+                      height: 200,
+                      child: ListView.builder(
+                        reverse: true,
+                        padding: const EdgeInsets.symmetric(
+                            vertical: 4),
+                        itemCount: _chat.length,
+                        itemBuilder: (_, idx) {
+                          final m = _chat[_chat.length - 1 - idx];
+                          final isCustomer = m.from == 'customer';
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(
+                                vertical: 4),
+                            child: Row(
+                              mainAxisAlignment: isCustomer
+                                  ? MainAxisAlignment.start
+                                  : MainAxisAlignment.end,
+                              children: [
+                                Flexible(
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 8),
+                                    decoration: BoxDecoration(
+                                      color: isCustomer
+                                          ? glovoCardLight
+                                          : glovoYellow,
+                                      borderRadius: BorderRadius.only(
+                                        topLeft:
+                                            const Radius.circular(14),
+                                        topRight:
+                                            const Radius.circular(14),
+                                        bottomLeft: Radius.circular(
+                                            isCustomer ? 4 : 14),
+                                        bottomRight: Radius.circular(
+                                            isCustomer ? 14 : 4),
+                                      ),
+                                    ),
+                                    child: Text(m.text,
+                                        style: TextStyle(
+                                          color: isCustomer
+                                              ? Colors.white
+                                              : glovoDark,
+                                          fontSize: 13,
+                                        )),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                    const Divider(color: glovoCardLight, height: 12),
+                    Wrap(
+                      spacing: 8,
+                      children: _customerQuickReplies
+                          .map((r) => InkWell(
+                                onTap: () => _courierReply(r),
+                                borderRadius: BorderRadius.circular(20),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 12, vertical: 8),
+                                  decoration: BoxDecoration(
+                                    color: glovoCardLight,
+                                    borderRadius: BorderRadius.circular(20),
+                                    border: Border.all(
+                                      color: glovoMuted
+                                          .withValues(alpha: 0.3),
+                                    ),
+                                  ),
+                                  child: Text(r,
+                                      style: const TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w700)),
+                                ),
+                              ))
+                          .toList(),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -5289,7 +5916,19 @@ class _CourierHomeState extends State<CourierHome>
                                     color: Colors.white, size: 18)
                                 : null,
                           ),
-                          const SizedBox(width: 12),
+                          const SizedBox(width: 10),
+                          Container(
+                            width: 44,
+                            height: 44,
+                            decoration: BoxDecoration(
+                              color: glovoCardLight,
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            alignment: Alignment.center,
+                            child: Text(emojiForItem(item),
+                                style: const TextStyle(fontSize: 24)),
+                          ),
+                          const SizedBox(width: 10),
                           Expanded(
                             child: Text(item,
                                 style: TextStyle(
