@@ -952,6 +952,7 @@ enum CourierState {
   takingPhoto,
   orderCancelled,
   toCustomer,
+  findingApartment,
   atCustomer,
   ratingPending,
   delivered,
@@ -1053,6 +1054,11 @@ class _CourierHomeState extends State<CourierHome>
 
   // Customer arrival sub-state
   int _customerPhase = 0; // 0=knocking, 1=opened, 2=noAnswer, 3=leaveAtDoor
+
+  // Find-apartment mini-game
+  List<int> _apartmentDoors = [];
+  int _correctApartment = 0;
+  int _wrongApartmentTries = 0;
   int _knockCount = 0;
   Timer? _knockTimer;
   Timer? _customerCallTimer;
@@ -2175,6 +2181,47 @@ class _CourierHomeState extends State<CourierHome>
   // ===== CUSTOMER ARRIVAL =====
   void _onArriveAtCustomer() {
     if (!mounted) return;
+    // Mini-game: find the right apartment
+    final correct = 1 + _rng.nextInt(48);
+    final doors = <int>{correct};
+    while (doors.length < 8) {
+      var n = (correct + _rng.nextInt(20) - 10).clamp(1, 60);
+      // ensure variety, never duplicate
+      if (n == correct && doors.length < 7) n = (n + 1).clamp(1, 60);
+      doors.add(n);
+    }
+    final shuffled = doors.toList()..shuffle(_rng);
+    setState(() {
+      _state = CourierState.findingApartment;
+      _apartmentDoors = shuffled;
+      _correctApartment = correct;
+      _wrongApartmentTries = 0;
+    });
+    HapticFeedback.mediumImpact();
+  }
+
+  void _pickApartment(int n) {
+    if (n == _correctApartment) {
+      AudioService.instance.sfx('button_tap.mp3', volume: 0.5);
+      HapticFeedback.lightImpact();
+      _enterCustomerKnocking();
+    } else {
+      setState(() => _wrongApartmentTries++);
+      HapticFeedback.heavyImpact();
+      AudioService.instance.sfx('phone_ring.mp3', volume: 0.4);
+      if (_wrongApartmentTries >= 3) {
+        // Player gives up — slight rating penalty for poor service
+        setState(() => _rating = max(4.20, _rating - 0.03));
+        _showEventBanner('Tracisz czas — klient niezadowolony', glovoOrange);
+        _enterCustomerKnocking();
+      } else {
+        _showEventBanner('Złe drzwi (${3 - _wrongApartmentTries} próby)',
+            glovoRed);
+      }
+    }
+  }
+
+  void _enterCustomerKnocking() {
     setState(() {
       _state = CourierState.atCustomer;
       _customerPhase = 0;
