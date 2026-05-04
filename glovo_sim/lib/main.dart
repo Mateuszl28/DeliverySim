@@ -3961,12 +3961,17 @@ class _CourierHomeState extends State<CourierHome>
                   children: [
                     Row(
                       children: [
-                        Text(_name ?? 'Kurier',
-                            style: const TextStyle(
-                                fontWeight: FontWeight.w800, fontSize: 15)),
+                        Flexible(
+                          child: Text(_name ?? 'Kurier',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 15)),
+                        ),
                         const SizedBox(width: 6),
                         Icon(_vehicle.icon, size: 14, color: glovoMuted),
-                        const SizedBox(width: 6),
+                        const SizedBox(width: 4),
                         Icon(_zone.icon, size: 14, color: _zone.color),
                       ],
                     ),
@@ -3992,10 +3997,11 @@ class _CourierHomeState extends State<CourierHome>
                   ],
                 ),
               ),
+              const SizedBox(width: 6),
               _seasonChip(),
-              const SizedBox(width: 6),
+              if (online) const SizedBox(width: 4),
               if (online) _weatherChip(),
-              const SizedBox(width: 6),
+              if (online) const SizedBox(width: 4),
               if (online) _clockChip(),
             ],
           ),
