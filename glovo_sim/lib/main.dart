@@ -1108,6 +1108,18 @@ class _CourierHomeState extends State<CourierHome>
             .toList();
       }
 
+      final kmJson = p.getString('kmDriven');
+      if (kmJson != null) {
+        final m = jsonDecode(kmJson) as Map<String, dynamic>;
+        m.forEach((k, v) => _kmDriven[k] = (v as num).toDouble());
+      }
+
+      final eventJson = p.getString('activeEvent');
+      if (eventJson != null) {
+        _activeEvent = CityEvent.fromJson(
+            jsonDecode(eventJson) as Map<String, dynamic>);
+      }
+
       final weeklyJson = p.getString('weekly');
       if (weeklyJson != null) {
         final m = jsonDecode(weeklyJson) as Map<String, dynamic>;
@@ -1218,6 +1230,12 @@ class _CourierHomeState extends State<CourierHome>
     if (_weekly != null) {
       await p.setString('weekly', jsonEncode(_weekly!.toJson()));
     }
+    await p.setString('kmDriven', jsonEncode(_kmDriven));
+    if (_activeEvent != null) {
+      await p.setString('activeEvent', jsonEncode(_activeEvent!.toJson()));
+    } else {
+      await p.remove('activeEvent');
+    }
   }
 
   Future<void> _resetProgress() async {
@@ -1253,6 +1271,9 @@ class _CourierHomeState extends State<CourierHome>
       _weekStartDate = null;
       _weeklyNet = 0;
       _weeklyDeliveries = 0;
+      _kmDriven.clear();
+      _activeEvent = null;
+      _breakdownActive = false;
       _history.clear();
       _stackedOrder = null;
       _pendingStackOffer = null;
