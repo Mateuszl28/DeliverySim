@@ -665,6 +665,48 @@ class ChatMessage {
   ChatMessage(this.from, this.text, this.simHour);
 }
 
+enum CityEventKind {
+  match('Mecz Legii', '⚽', Color(0xFF2BD17E), 1.55, 1.6),
+  concert('Koncert na PGE', '🎤', Color(0xFF8C5BF0), 1.40, 1.45),
+  parade('Parada w Centrum', '🎉', Color(0xFFFFC244), 1.30, 1.35),
+  marathon('Maraton (zamknięte ulice)', '🏃', Color(0xFF4D9DFF), 1.25, 0.85),
+  tradeFair('Targi w EXPO', '🛍️', Color(0xFFFF5A5F), 1.35, 1.30),
+  movieShoot('Plan filmowy', '🎬', Color(0xFFE0BBFF), 1.20, 0.75);
+
+  final String label;
+  final String emoji;
+  final Color color;
+  final double surgeBoost; // applied to base surge if event in player's zone
+  final double demandMul;  // applied to demand (>1 faster orders, <1 slower)
+  const CityEventKind(this.label, this.emoji, this.color,
+      this.surgeBoost, this.demandMul);
+}
+
+class CityEvent {
+  final CityEventKind kind;
+  final Zone zone;
+  int remainingMin;
+  CityEvent({required this.kind, required this.zone, required this.remainingMin});
+
+  Map<String, dynamic> toJson() => {
+        'kind': kind.name,
+        'zone': zone.name,
+        'remainingMin': remainingMin,
+      };
+
+  static CityEvent? fromJson(Map<String, dynamic> j) {
+    try {
+      return CityEvent(
+        kind: CityEventKind.values.firstWhere((k) => k.name == j['kind']),
+        zone: Zone.values.firstWhere((z) => z.name == j['zone']),
+        remainingMin: (j['remainingMin'] as num).toInt(),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
 const Map<String, String> _itemEmojis = {
   'Big Mac': '🍔',
   'Cheeseburger': '🍔',
@@ -884,6 +926,18 @@ class _CourierHomeState extends State<CourierHome>
   String? _eventBanner;
   Color _eventColor = glovoBlue;
   Timer? _eventBannerTimer;
+
+  // City events (festyn / mecz / koncert / parada)
+  CityEvent? _activeEvent;
+  int _eventCheckIn = 25; // sim minutes until next spawn roll
+
+  // Vehicle wear (km counter per vehicle name → km driven since service)
+  final Map<String, double> _kmDriven = {};
+  bool _breakdownActive = false;
+  bool _breakdownChoiceShown = false;
+
+  // Red light "Run it" choice
+  bool _redLightChoiceActive = false;
 
   // Last shift snapshot, captured when ending a shift
   int? _lastShiftDeliveries;
@@ -1264,6 +1318,8 @@ class _CourierHomeState extends State<CourierHome>
     else if (h >= 22 || h < 7) s = 0.9;
     if (_weather == Weather.heavyRain) s += 0.3;
     else if (_weather == Weather.rainy) s += 0.15;
+    final ev = _activeEvent;
+    if (ev != null && ev.zone == _zone) s *= ev.kind.surgeBoost;
     return double.parse(s.toStringAsFixed(2));
   }
 
@@ -1281,6 +1337,8 @@ class _CourierHomeState extends State<CourierHome>
     if (_weather == Weather.rainy) base *= 0.75;
     if (_weather == Weather.heavyRain) base *= 0.6;
     base /= _zone.demandMul;
+    final ev = _activeEvent;
+    if (ev != null && ev.zone == _zone) base /= ev.kind.demandMul;
     return max(2, base.round());
   }
 
