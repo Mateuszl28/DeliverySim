@@ -5432,6 +5432,107 @@ class _CourierHomeState extends State<CourierHome>
     );
   }
 
+  Widget _duelCard() {
+    final d = _activeDuel;
+    if (d == null) {
+      return Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: glovoCard,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: const Text(
+            'Zaloguj się jutro, by stanąć do pojedynku z rywalem',
+            style: TextStyle(color: glovoMuted, fontSize: 12)),
+      );
+    }
+    final r = _rivalById(d.rivalId);
+    final ratio = (d.progressNet / d.targetNet).clamp(0.0, 1.0);
+    final winning = d.progressNet >= d.targetNet;
+    final color = winning ? glovoGreen : glovoRed;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [color.withValues(alpha: 0.22), glovoCard],
+        ),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: color.withValues(alpha: 0.45),
+          width: 1.2,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Center(
+                    child:
+                        Text(r.emoji, style: const TextStyle(fontSize: 22))),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(r.name,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w800, fontSize: 14)),
+                    Text('${r.style} · lvl ${r.level}',
+                        style: const TextStyle(
+                            color: glovoMuted, fontSize: 11)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: LinearProgressIndicator(
+              value: ratio,
+              minHeight: 7,
+              backgroundColor: glovoCardLight,
+              valueColor: AlwaysStoppedAnimation(color),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Text(
+                  '${d.progressNet.toStringAsFixed(2)} / '
+                  '${d.targetNet.toStringAsFixed(2)} zł',
+                  style: TextStyle(
+                      color: color,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 12)),
+              const Spacer(),
+              Text(winning ? 'Prowadzisz!' : 'Trzeba dorobić',
+                  style: TextStyle(
+                      color: color,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 11)),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text('"${r.taunt}"',
+              style: const TextStyle(
+                  color: glovoMuted,
+                  fontStyle: FontStyle.italic,
+                  fontSize: 11)),
+        ],
+      ),
+    );
+  }
+
   Widget _careerCard() {
     final m = _currentCareerMission;
     if (m == null) {
