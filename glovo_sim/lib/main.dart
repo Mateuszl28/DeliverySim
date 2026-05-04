@@ -4599,7 +4599,7 @@ class _CourierHomeState extends State<CourierHome>
                 style:
                     TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
             const Spacer(),
-            Text('${_careerProgress}/${_career.length}',
+            Text('$_careerProgress/${_career.length}',
                 style: const TextStyle(color: glovoMuted, fontSize: 12)),
           ],
         ),
