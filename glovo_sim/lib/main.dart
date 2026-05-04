@@ -5170,7 +5170,11 @@ class _CourierHomeState extends State<CourierHome>
 
   Widget _zoneRow(Zone z) {
     final selected = _zone == z;
-    final locked = z.unlockLevel > _level;
+    final locked = !_isZoneUnlocked(z);
+    final careerHint = _career
+        .where((m) => m.unlockZone == z.name)
+        .map((m) => m.title)
+        .firstOrNull;
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: InkWell(
@@ -5222,7 +5226,10 @@ class _CourierHomeState extends State<CourierHome>
                     children: [
                       const Icon(Icons.lock_rounded,
                           color: glovoMuted, size: 16),
-                      Text('lvl ${z.unlockLevel}',
+                      Text(
+                          careerHint != null
+                              ? 'misja'
+                              : 'lvl ${z.unlockLevel}',
                           style: const TextStyle(
                               color: glovoMuted, fontSize: 10)),
                     ],
