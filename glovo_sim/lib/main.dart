@@ -6060,12 +6060,57 @@ class _CourierHomeState extends State<CourierHome>
                 Text('${_trafficLightSec}s',
                     style: const TextStyle(
                         color: glovoYellow, fontSize: 14)),
+                const SizedBox(height: 12),
+                ElevatedButton.icon(
+                  onPressed: _runRedLight,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: glovoOrange,
+                    foregroundColor: glovoDark,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 8),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  icon: const Icon(Icons.warning_amber_rounded, size: 16),
+                  label: const Text('Przejedź',
+                      style: TextStyle(
+                          fontWeight: FontWeight.w800, fontSize: 12)),
+                ),
+                const SizedBox(height: 4),
+                const Text('25% szansy mandatu',
+                    style: TextStyle(color: glovoMuted, fontSize: 10)),
               ],
             ),
           ),
         ),
       ),
     );
+  }
+
+  void _runRedLight() {
+    if (!_trafficLightActive) return;
+    HapticFeedback.heavyImpact();
+    AudioService.instance.sfx('button_tap.mp3', volume: 0.7);
+    final caught = _rng.nextDouble() < 0.25;
+    setState(() {
+      _trafficLightActive = false;
+      _trafficLightSec = 0;
+    });
+    if (caught) {
+      const fine = 50.0;
+      setState(() {
+        _fuelCost += fine;
+        _rating = max(4.20, _rating - 0.10);
+      });
+      AudioService.instance.sfx('phone_ring.mp3', volume: 0.6);
+      _showEventBanner(
+          'Mandat za czerwone: −${fine.toStringAsFixed(0)} zł, ocena spada',
+          glovoRed);
+    } else {
+      AudioService.instance.sfx('cash.mp3', volume: 0.4);
+      _showEventBanner('Przejechałeś — czysto', glovoGreen);
+    }
   }
 
   Widget _buildStackOfferOverlay(Order o) {
