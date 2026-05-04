@@ -7173,8 +7173,8 @@ class _CourierHomeState extends State<CourierHome>
               borderRadius: BorderRadius.circular(20),
             ),
             child: Text(
-                'Mieszkanie ${_correctApartment}'
-                '${_wrongApartmentTries > 0 ? " · pomyłki: ${_wrongApartmentTries}/3" : ""}',
+                'Mieszkanie $_correctApartment'
+                '${_wrongApartmentTries > 0 ? " · pomyłki: $_wrongApartmentTries/3" : ""}',
                 style: const TextStyle(
                     color: glovoYellow,
                     fontWeight: FontWeight.w800,
