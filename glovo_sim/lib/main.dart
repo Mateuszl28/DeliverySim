@@ -1204,6 +1204,11 @@ class _CourierHomeState extends State<CourierHome>
   int _careerProgress = 0;
   final Set<String> _careerUnlockedZones = {};
 
+  // Daily duel vs a rival
+  DailyDuel? _activeDuel;
+  int _duelsWon = 0;
+  int _duelsLost = 0;
+
   // Saved route callback for resuming after a breakdown decision
   VoidCallback? _pendingRouteCallback;
 
