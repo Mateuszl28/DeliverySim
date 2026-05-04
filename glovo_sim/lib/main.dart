@@ -665,6 +665,159 @@ class ChatMessage {
   ChatMessage(this.from, this.text, this.simHour);
 }
 
+class CareerMission {
+  final String id;
+  final String chapter;
+  final String title;
+  final String desc;
+  final IconData icon;
+  final Color color;
+  final double reward;
+  final int xpReward;
+  final String? unlockZone; // Zone.name to unlock on claim
+  final int Function(_CourierHomeState s) progress;
+  final int target;
+  const CareerMission({
+    required this.id,
+    required this.chapter,
+    required this.title,
+    required this.desc,
+    required this.icon,
+    required this.color,
+    required this.reward,
+    this.xpReward = 0,
+    this.unlockZone,
+    required this.progress,
+    required this.target,
+  });
+}
+
+List<CareerMission> _buildCareerMissions() => [
+      CareerMission(
+        id: 'first_steps',
+        chapter: 'Rozdział 1 · Pierwsze kroki',
+        title: 'Pierwsze rozdanie',
+        desc: 'Dowieź swoje pierwsze 3 zamówienia',
+        icon: Icons.local_shipping_rounded,
+        color: glovoYellow,
+        reward: 20,
+        xpReward: 30,
+        progress: (s) => s._completed,
+        target: 3,
+      ),
+      CareerMission(
+        id: 'first_hundred',
+        chapter: 'Rozdział 1 · Pierwsze kroki',
+        title: 'Pierwsza dycha (właściwie stówa)',
+        desc: 'Zarób 100 zł netto',
+        icon: Icons.payments_rounded,
+        color: glovoGreen,
+        reward: 30,
+        xpReward: 30,
+        progress: (s) => (s._gross - s._fuelCost).floor().clamp(0, 100),
+        target: 100,
+      ),
+      CareerMission(
+        id: 'rookie_run',
+        chapter: 'Rozdział 2 · Awans',
+        title: 'Robota nogami',
+        desc: 'Dowieź 10 zamówień (rozgrzewka)',
+        icon: Icons.directions_run_rounded,
+        color: glovoBlue,
+        reward: 50,
+        xpReward: 50,
+        progress: (s) => s._completed,
+        target: 10,
+      ),
+      CareerMission(
+        id: 'mokotow_unlock',
+        chapter: 'Rozdział 3 · Mokotów wita',
+        title: 'Otwarcie Mokotów',
+        desc: 'Dowieź 25 zamówień, ocena 4.85+',
+        icon: Icons.apartment_rounded,
+        color: glovoBlue,
+        reward: 80,
+        xpReward: 80,
+        unlockZone: 'mokotow',
+        progress: (s) => s._rating >= 4.85 ? s._completed : 0,
+        target: 25,
+      ),
+      CareerMission(
+        id: 'cash_flow',
+        chapter: 'Rozdział 4 · Pieniądze nie śmierdzą',
+        title: 'Pierwsza pięć stów',
+        desc: 'Zarób 500 zł netto łącznie',
+        icon: Icons.savings_rounded,
+        color: glovoGreen,
+        reward: 120,
+        xpReward: 100,
+        progress: (s) => (s._gross - s._fuelCost).floor().clamp(0, 500),
+        target: 500,
+      ),
+      CareerMission(
+        id: 'five_star_grind',
+        chapter: 'Rozdział 5 · Klient nasz pan',
+        title: 'Pięć gwiazdek',
+        desc: 'Zbierz 50× ocenę 5★',
+        icon: Icons.star_rounded,
+        color: glovoYellow,
+        reward: 150,
+        xpReward: 100,
+        progress: (s) => s._fiveStarTotal,
+        target: 50,
+      ),
+      CareerMission(
+        id: 'wilanow_unlock',
+        chapter: 'Rozdział 6 · VIP w Wilanowie',
+        title: 'Wpadka do Wilanowa',
+        desc: 'Dowieź 100 zamówień, ocena 4.90+',
+        icon: Icons.villa_rounded,
+        color: glovoPurple,
+        reward: 300,
+        xpReward: 150,
+        unlockZone: 'wilanow',
+        progress: (s) => s._rating >= 4.90 ? s._completed : 0,
+        target: 100,
+      ),
+      CareerMission(
+        id: 'big_tipper',
+        chapter: 'Rozdział 7 · Kasa w kieszeń',
+        title: 'Duży napiwek',
+        desc: 'Otrzymaj jeden napiwek 15 zł lub większy',
+        icon: Icons.workspace_premium_rounded,
+        color: glovoOrange,
+        reward: 180,
+        xpReward: 80,
+        progress: (s) => s._maxTipReceived.floor().clamp(0, 15),
+        target: 15,
+      ),
+      CareerMission(
+        id: 'lotnisko_unlock',
+        chapter: 'Rozdział 8 · Lotnisko Chopina',
+        title: 'Wjazd na pas startowy',
+        desc: 'Dowieź 200 zamówień, ocena 4.92+',
+        icon: Icons.flight_takeoff_rounded,
+        color: glovoOrange,
+        reward: 500,
+        xpReward: 250,
+        unlockZone: 'lotnisko',
+        progress: (s) => s._rating >= 4.92 ? s._completed : 0,
+        target: 200,
+      ),
+      CareerMission(
+        id: 'top_courier',
+        chapter: 'Rozdział 9 · Top kurier dzielnicy',
+        title: 'Tytuł Top Kuriera',
+        desc: 'Dowieź 365 zamówień (rok pracy)',
+        icon: Icons.emoji_events_rounded,
+        color: glovoYellow,
+        reward: 1000,
+        xpReward: 500,
+        progress: (s) => s._completed,
+        target: 365,
+      ),
+    ];
+
 enum CityEventKind {
   match('Mecz Legii', '⚽', Color(0xFF2BD17E), 1.55, 1.6),
   concert('Koncert na PGE', '🎤', Color(0xFF8C5BF0), 1.40, 1.45),
