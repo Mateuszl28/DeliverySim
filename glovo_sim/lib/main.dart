@@ -186,6 +186,27 @@ enum OrderCategory {
   const OrderCategory(this.label, this.icon, this.color);
 }
 
+enum CustomerType {
+  generous('Hojny', '💸', Color(0xFF2BD17E), 1.6, 0.05,
+      'Lubi sypać napiwkiem'),
+  vip('VIP', '👔', Color(0xFF8C5BF0), 2.0, 0.10,
+      'Premium klient — wymaga premium serwisu'),
+  normal('Standard', '👤', Color(0xFF8B93A7), 1.0, 0.0, 'Bez fajerwerków'),
+  picky('Marudny', '🤨', Color(0xFFFFB940), 0.7, -0.10,
+      'Czepia się szczegółów'),
+  rude('Niemiły', '😠', Color(0xFFFF5A5F), 0.5, -0.20,
+      'Lepiej dowieź szybko i w spokoju');
+
+  final String label;
+  final String emoji;
+  final Color color;
+  final double tipMul;
+  final double fiveStarBoost; // added to roll, lower = more 5★
+  final String hint;
+  const CustomerType(this.label, this.emoji, this.color, this.tipMul,
+      this.fiveStarBoost, this.hint);
+}
+
 class Order {
   final OrderCategory category;
   final String partner;
@@ -201,6 +222,7 @@ class Order {
   final int prepSeconds;
   final bool willCancel;
   final bool isRegular;
+  final CustomerType customerType;
   double tip;
   int customerStars;
 
@@ -219,6 +241,7 @@ class Order {
     required this.prepSeconds,
     required this.willCancel,
     this.isRegular = false,
+    this.customerType = CustomerType.normal,
   })  : tip = 0,
         customerStars = 5;
 
@@ -2116,6 +2139,7 @@ class _CourierHomeState extends State<CourierHome>
             : 2 + _rng.nextInt(4);
     if (_ownedGear.contains('vip')) prep = (prep * 0.7).ceil();
     final willCancel = !isRegular && _rng.nextDouble() < 0.06;
+    final ctype = _generateCustomerType(isRegular: isRegular);
 
     setState(() {
       _currentOrder = Order(
@@ -2133,6 +2157,7 @@ class _CourierHomeState extends State<CourierHome>
         prepSeconds: prep,
         willCancel: willCancel,
         isRegular: isRegular,
+        customerType: ctype,
       );
       _state = CourierState.orderIncoming;
       _orderCountdown = 15;
@@ -2476,14 +2501,30 @@ class _CourierHomeState extends State<CourierHome>
     else if (r < 0.95) tip = 3 + _rng.nextDouble() * 4;
     else tip = 7 + _rng.nextDouble() * 8;
     tip *= _zone.tipMul;
+    tip *= o.customerType.tipMul;
     if (o.isRegular) tip *= 1.5;
     return double.parse(tip.toStringAsFixed(2));
+  }
+
+  CustomerType _generateCustomerType({required bool isRegular}) {
+    if (isRegular) {
+      final r = _rng.nextDouble();
+      if (r < 0.30) return CustomerType.vip;
+      if (r < 0.90) return CustomerType.generous;
+      return CustomerType.normal;
+    }
+    final r = _rng.nextDouble();
+    if (r < 0.65) return CustomerType.normal;
+    if (r < 0.80) return CustomerType.generous;
+    if (r < 0.92) return CustomerType.picky;
+    if (r < 0.97) return CustomerType.rude;
+    return CustomerType.vip;
   }
 
   int _rollCustomerStars(Order o) {
     var boost = _ownedGear.contains('thermo') ? 0.08 : 0.0;
     if (o.isRegular) boost += 0.12;
-    final r = _rng.nextDouble() - boost;
+    final r = _rng.nextDouble() - boost - o.customerType.fiveStarBoost;
     if (r < 0.78) return 5;
     if (r < 0.93) return 4;
     if (r < 0.98) return 3;
@@ -2994,6 +3035,7 @@ class _CourierHomeState extends State<CourierHome>
       prepSeconds: prep,
       willCancel: false,
       isRegular: isRegular,
+      customerType: _generateCustomerType(isRegular: isRegular),
     );
   }
 
@@ -6240,8 +6282,10 @@ class _CourierHomeState extends State<CourierHome>
       padding: const EdgeInsets.all(16),
       child: Column(
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
+          Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 6,
+            runSpacing: 6,
             children: [
               Container(
                 padding: const EdgeInsets.symmetric(
@@ -6264,8 +6308,7 @@ class _CourierHomeState extends State<CourierHome>
                   ],
                 ),
               ),
-              if (o.isRegular) ...[
-                const SizedBox(width: 6),
+              if (o.isRegular)
                 Container(
                   padding: const EdgeInsets.symmetric(
                       horizontal: 10, vertical: 4),
@@ -6273,13 +6316,13 @@ class _CourierHomeState extends State<CourierHome>
                     color: glovoPurple.withValues(alpha: 0.18),
                     borderRadius: BorderRadius.circular(20),
                   ),
-                  child: Row(
+                  child: const Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.favorite_rounded,
+                      Icon(Icons.favorite_rounded,
                           color: glovoPurple, size: 14),
-                      const SizedBox(width: 4),
-                      const Text('Stały klient',
+                      SizedBox(width: 4),
+                      Text('Stały klient',
                           style: TextStyle(
                               color: glovoPurple,
                               fontWeight: FontWeight.w700,
@@ -6287,9 +6330,39 @@ class _CourierHomeState extends State<CourierHome>
                     ],
                   ),
                 ),
-              ],
+              if (o.customerType != CustomerType.normal)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: o.customerType.color.withValues(alpha: 0.18),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(o.customerType.emoji,
+                          style: const TextStyle(fontSize: 13)),
+                      const SizedBox(width: 4),
+                      Text(o.customerType.label,
+                          style: TextStyle(
+                              color: o.customerType.color,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 12)),
+                    ],
+                  ),
+                ),
             ],
           ),
+          if (o.customerType != CustomerType.normal) ...[
+            const SizedBox(height: 6),
+            Text(o.customerType.hint,
+                style: TextStyle(
+                    color: o.customerType.color.withValues(alpha: 0.85),
+                    fontSize: 11,
+                    fontStyle: FontStyle.italic),
+                textAlign: TextAlign.center),
+          ],
           const SizedBox(height: 12),
           Stack(
             alignment: Alignment.center,
