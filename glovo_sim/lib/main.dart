@@ -939,6 +939,9 @@ class _CourierHomeState extends State<CourierHome>
   // Red light "Run it" choice
   bool _redLightChoiceActive = false;
 
+  // Saved route callback for resuming after a breakdown decision
+  VoidCallback? _pendingRouteCallback;
+
   // Last shift snapshot, captured when ending a shift
   int? _lastShiftDeliveries;
   double? _lastShiftNet;
