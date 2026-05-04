@@ -3152,6 +3152,8 @@ class _CourierHomeState extends State<CourierHome>
     var phoneTriggered = false;
     final routeKm = o.distanceKm;
     var kmCounted = false;
+    var quickStartHandled = false;
+    _startQuickStart();
 
     // Initial speed
     setState(() {
@@ -3168,6 +3170,15 @@ class _CourierHomeState extends State<CourierHome>
       if (!mounted) {
         t.cancel();
         return;
+      }
+
+      // Apply quick-start boost once
+      if (!quickStartHandled && _quickStartConsumed) {
+        quickStartHandled = true;
+        if (_quickStartHit) {
+          final remaining = totalSteps - step;
+          step += (remaining * 0.15).round();
+        }
       }
 
       // Traffic light tick
@@ -3263,6 +3274,13 @@ class _CourierHomeState extends State<CourierHome>
       if (step >= totalSteps) {
         t.cancel();
         AudioService.instance.stopLoop('engine');
+        _quickStartTimer?.cancel();
+        if (_quickStartActive) {
+          setState(() {
+            _quickStartActive = false;
+            _quickStartConsumed = true;
+          });
+        }
         if (!kmCounted && _vehicle != Vehicle.bike) {
           _kmDriven[_vehicle.name] =
               (_kmDriven[_vehicle.name] ?? 0) + routeKm;
@@ -3275,6 +3293,149 @@ class _CourierHomeState extends State<CourierHome>
         onComplete();
       }
     });
+  }
+
+  // ===== QUICK-START MINI-GAME =====
+  void _startQuickStart() {
+    _quickStartTimer?.cancel();
+    setState(() {
+      _quickStartActive = true;
+      _quickStartProgress = 0;
+      _quickStartConsumed = false;
+      _quickStartHit = false;
+    });
+    _quickStartTimer = Timer.periodic(
+        const Duration(milliseconds: 30), (t) {
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
+      setState(() {
+        _quickStartProgress += 0.022; // ~1.4s to fill
+      });
+      if (_quickStartProgress >= 1.0) {
+        t.cancel();
+        setState(() {
+          _quickStartActive = false;
+          _quickStartConsumed = true;
+        });
+      }
+    });
+  }
+
+  void _tapQuickStart() {
+    if (!_quickStartActive || _quickStartConsumed) return;
+    _quickStartTimer?.cancel();
+    final hit = _quickStartProgress >= _quickStartLow &&
+        _quickStartProgress <= _quickStartHigh;
+    setState(() {
+      _quickStartActive = false;
+      _quickStartConsumed = true;
+      _quickStartHit = hit;
+    });
+    HapticFeedback.heavyImpact();
+    if (hit) {
+      AudioService.instance.sfx('cash.mp3', volume: 0.5);
+      _showEventBanner('💨 Quick start! −15% czasu trasy', glovoYellow);
+    } else {
+      AudioService.instance.sfx('button_tap.mp3', volume: 0.4);
+    }
+  }
+
+  bool _quickStartHit = false;
+
+  Widget _quickStartOverlay() {
+    return Positioned(
+      left: 16,
+      right: 16,
+      bottom: 16,
+      child: Material(
+        color: Colors.transparent,
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.85),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+                color: glovoYellow.withValues(alpha: 0.5), width: 1),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.bolt_rounded,
+                      color: glovoYellow, size: 18),
+                  SizedBox(width: 4),
+                  Text('Tapnij gdy w żółtej strefie',
+                      style: TextStyle(
+                          color: glovoYellow,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 13)),
+                ],
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                height: 18,
+                child: LayoutBuilder(builder: (ctx, c) {
+                  final w = c.maxWidth;
+                  return Stack(children: [
+                    // Track
+                    Container(
+                      decoration: BoxDecoration(
+                        color: glovoCardLight,
+                        borderRadius: BorderRadius.circular(9),
+                      ),
+                    ),
+                    // Sweet zone
+                    Positioned(
+                      left: w * _quickStartLow,
+                      width: w * (_quickStartHigh - _quickStartLow),
+                      top: 0,
+                      bottom: 0,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: glovoYellow.withValues(alpha: 0.45),
+                          borderRadius: BorderRadius.circular(9),
+                        ),
+                      ),
+                    ),
+                    // Indicator
+                    Positioned(
+                      left: (w * _quickStartProgress - 2)
+                          .clamp(0.0, w - 4),
+                      width: 4,
+                      top: 0,
+                      bottom: 0,
+                      child: Container(color: Colors.white),
+                    ),
+                  ]);
+                }),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _tapQuickStart,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: glovoYellow,
+                    foregroundColor: glovoDark,
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text('TAP',
+                      style: TextStyle(
+                          fontWeight: FontWeight.w900, fontSize: 16)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   // ===== VEHICLE BREAKDOWN =====
@@ -3390,9 +3551,13 @@ class _CourierHomeState extends State<CourierHome>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                           fontWeight: FontWeight.w800, fontSize: 14)),
                   Text(subtitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                           color: glovoMuted, fontSize: 11)),
                 ],
@@ -4434,6 +4599,32 @@ class _CourierHomeState extends State<CourierHome>
         const SizedBox(height: 24),
         Row(
           children: [
+            const Icon(Icons.pie_chart_rounded,
+                color: glovoGreen, size: 18),
+            const SizedBox(width: 6),
+            const Text('Kategorie zamówień',
+                style:
+                    TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+          ],
+        ),
+        const SizedBox(height: 8),
+        _buildCategoryChart(),
+        const SizedBox(height: 24),
+        Row(
+          children: [
+            const Icon(Icons.star_half_rounded,
+                color: glovoYellow, size: 18),
+            const SizedBox(width: 6),
+            const Text('Rozkład ocen',
+                style:
+                    TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+          ],
+        ),
+        const SizedBox(height: 8),
+        _buildStarsDistribution(),
+        const SizedBox(height: 24),
+        Row(
+          children: [
             const Icon(Icons.history_rounded, color: glovoYellow, size: 18),
             const SizedBox(width: 6),
             Text('Historia dostaw (${_history.length})',
@@ -4574,6 +4765,169 @@ class _CourierHomeState extends State<CourierHome>
               }),
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCategoryChart() {
+    if (_history.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: glovoCard,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Center(
+          child: Text('Brak danych — wykonaj kilka dostaw',
+              style: TextStyle(color: glovoMuted, fontSize: 12)),
+        ),
+      );
+    }
+    final byCat = <OrderCategory, double>{};
+    final cntCat = <OrderCategory, int>{};
+    for (final d in _history) {
+      byCat[d.category] = (byCat[d.category] ?? 0) + d.net;
+      cntCat[d.category] = (cntCat[d.category] ?? 0) + 1;
+    }
+    final maxVal = byCat.values.reduce(max);
+    final entries = byCat.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: glovoCard,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        children: entries.map((e) {
+          final ratio = (e.value / maxVal).clamp(0.0, 1.0);
+          final cnt = cntCat[e.key] ?? 0;
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 5),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(e.key.icon, color: e.key.color, size: 14),
+                    const SizedBox(width: 6),
+                    Text(e.key.label,
+                        style: TextStyle(
+                            color: e.key.color,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 12)),
+                    const Spacer(),
+                    Text(
+                        '${e.value.toStringAsFixed(2)} zł · $cnt szt.',
+                        style: const TextStyle(
+                            color: glovoMuted, fontSize: 11)),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: LinearProgressIndicator(
+                    value: ratio,
+                    minHeight: 8,
+                    backgroundColor: glovoCardLight,
+                    valueColor: AlwaysStoppedAnimation(e.key.color),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  Widget _buildStarsDistribution() {
+    if (_history.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: glovoCard,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: const Center(
+          child: Text('Brak danych — wykonaj kilka dostaw',
+              style: TextStyle(color: glovoMuted, fontSize: 12)),
+        ),
+      );
+    }
+    final counts = <int, int>{};
+    for (final d in _history) {
+      counts[d.stars] = (counts[d.stars] ?? 0) + 1;
+    }
+    final total = _history.length;
+    final maxVal = counts.values.fold<int>(0, max);
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: glovoCard,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        children: [
+          SizedBox(
+            height: 110,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: List.generate(5, (i) {
+                final stars = i + 1;
+                final c = counts[stars] ?? 0;
+                final h = maxVal == 0 ? 0.0 : (c / maxVal) * 90;
+                final color = stars >= 5
+                    ? glovoGreen
+                    : stars >= 4
+                        ? glovoYellow
+                        : stars >= 3
+                            ? glovoOrange
+                            : glovoRed;
+                return Expanded(
+                  child: Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 6),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        Text('$c',
+                            style: const TextStyle(
+                                color: glovoMuted, fontSize: 10)),
+                        const SizedBox(height: 2),
+                        Container(
+                          height: h,
+                          decoration: BoxDecoration(
+                            color: color,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text('$stars',
+                                style: const TextStyle(
+                                    color: glovoMuted,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700)),
+                            const Icon(Icons.star_rounded,
+                                color: glovoYellow, size: 11),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+              'Średnia: ${(_history.map((d) => d.stars).reduce((a, b) => a + b) / total).toStringAsFixed(2)}★ '
+              '· $total dostaw',
+              style: const TextStyle(color: glovoMuted, fontSize: 11)),
         ],
       ),
     );
@@ -5908,13 +6262,21 @@ class _CourierHomeState extends State<CourierHome>
               children: [
                 Row(
                   children: [
-                    Text(v.label,
-                        style: const TextStyle(
-                            fontWeight: FontWeight.w700, fontSize: 13)),
+                    Flexible(
+                      child: Text(v.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w700, fontSize: 13)),
+                    ),
                     const SizedBox(width: 6),
-                    Text('${km.toStringAsFixed(1)} km',
-                        style: const TextStyle(
-                            color: glovoMuted, fontSize: 11)),
+                    Flexible(
+                      child: Text('${km.toStringAsFixed(1)} km',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              color: glovoMuted, fontSize: 11)),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 4),
@@ -6613,6 +6975,7 @@ class _CourierHomeState extends State<CourierHome>
                     child: _chatBubbleButton(),
                   ),
                 if (_trafficLightActive) _trafficLightOverlay(),
+                if (_quickStartActive) _quickStartOverlay(),
                 if (_chatOpen) _chatOverlay(),
               ],
             ),
