@@ -934,10 +934,6 @@ class _CourierHomeState extends State<CourierHome>
   // Vehicle wear (km counter per vehicle name → km driven since service)
   final Map<String, double> _kmDriven = {};
   bool _breakdownActive = false;
-  bool _breakdownChoiceShown = false;
-
-  // Red light "Run it" choice
-  bool _redLightChoiceActive = false;
 
   // Saved route callback for resuming after a breakdown decision
   VoidCallback? _pendingRouteCallback;
