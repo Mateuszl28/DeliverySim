@@ -4991,6 +4991,24 @@ class _CourierHomeState extends State<CourierHome>
           const SizedBox(height: 18),
         ],
 
+        // ===== Daily Duel =====
+        Row(
+          children: [
+            const Icon(Icons.sports_kabaddi_rounded,
+                color: glovoRed, size: 18),
+            const SizedBox(width: 6),
+            const Text('Pojedynek dnia',
+                style:
+                    TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+            const Spacer(),
+            Text('🏆 $_duelsWon · 💀 $_duelsLost',
+                style: const TextStyle(color: glovoMuted, fontSize: 12)),
+          ],
+        ),
+        const SizedBox(height: 8),
+        _duelCard(),
+        const SizedBox(height: 18),
+
         // ===== Leaderboard =====
         Row(
           children: [
