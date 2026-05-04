@@ -1088,6 +1088,11 @@ class _CourierHomeState extends State<CourierHome>
   final Map<String, double> _kmDriven = {};
   bool _breakdownActive = false;
 
+  // Career
+  late final List<CareerMission> _career;
+  int _careerProgress = 0;
+  final Set<String> _careerUnlockedZones = {};
+
   // Saved route callback for resuming after a breakdown decision
   VoidCallback? _pendingRouteCallback;
 
@@ -1177,7 +1182,48 @@ class _CourierHomeState extends State<CourierHome>
     )..repeat();
     _goals = _generateDailyGoals();
     _season = Season.currentForDate(DateTime.now());
+    _career = _buildCareerMissions();
     _loadState();
+  }
+
+  CareerMission? get _currentCareerMission =>
+      _careerProgress < _career.length ? _career[_careerProgress] : null;
+
+  bool get _careerMissionReady {
+    final m = _currentCareerMission;
+    if (m == null) return false;
+    return m.progress(this) >= m.target;
+  }
+
+  void _claimCareerMission() {
+    final m = _currentCareerMission;
+    if (m == null || !_careerMissionReady) return;
+    setState(() {
+      _gross += m.reward;
+      _xp += m.xpReward;
+      while (_xp >= _xpPerLevel) {
+        _xp -= _xpPerLevel;
+        _level++;
+      }
+      if (m.unlockZone != null) {
+        _careerUnlockedZones.add(m.unlockZone!);
+      }
+      _careerProgress++;
+    });
+    HapticFeedback.heavyImpact();
+    AudioService.instance.sfx('level_up.mp3');
+    final unlockNote = m.unlockZone != null
+        ? ' · odblokowano ${Zone.values.firstWhere((z) => z.name == m.unlockZone).label}'
+        : '';
+    _showEventBanner(
+        '🎖️ ${m.title}: +${m.reward.toStringAsFixed(0)} zł$unlockNote',
+        m.color);
+    _checkAchievements();
+    _saveState();
+  }
+
+  bool _isZoneUnlocked(Zone z) {
+    return _level >= z.unlockLevel || _careerUnlockedZones.contains(z.name);
   }
 
   Future<void> _loadState() async {
