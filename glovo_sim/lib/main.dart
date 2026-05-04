@@ -1315,6 +1315,10 @@ class _CourierHomeState extends State<CourierHome>
             jsonDecode(eventJson) as Map<String, dynamic>);
       }
 
+      _careerProgress = p.getInt('careerProgress') ?? 0;
+      _careerUnlockedZones
+          .addAll(p.getStringList('careerUnlockedZones') ?? []);
+
       final weeklyJson = p.getString('weekly');
       if (weeklyJson != null) {
         final m = jsonDecode(weeklyJson) as Map<String, dynamic>;
@@ -1431,6 +1435,9 @@ class _CourierHomeState extends State<CourierHome>
     } else {
       await p.remove('activeEvent');
     }
+    await p.setInt('careerProgress', _careerProgress);
+    await p.setStringList(
+        'careerUnlockedZones', _careerUnlockedZones.toList());
   }
 
   Future<void> _resetProgress() async {
@@ -1469,6 +1476,8 @@ class _CourierHomeState extends State<CourierHome>
       _kmDriven.clear();
       _activeEvent = null;
       _breakdownActive = false;
+      _careerProgress = 0;
+      _careerUnlockedZones.clear();
       _history.clear();
       _stackedOrder = null;
       _pendingStackOffer = null;
