@@ -2,11 +2,110 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-void main() => runApp(const GlovoSimApp());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await AudioService.instance.init();
+  runApp(const GlovoSimApp());
+}
+
+/// Singleton wrapper around `audioplayers`. All play calls swallow exceptions —
+/// missing assets are a no-op, so the game keeps running even before any audio
+/// files are dropped into `assets/audio/`. See `assets/audio/README.md` for the
+/// expected filenames.
+class AudioService {
+  AudioService._();
+  static final AudioService instance = AudioService._();
+
+  static const _prefsKey = 'sound_on';
+  static const int _sfxPoolSize = 6;
+
+  bool _enabled = true;
+  bool get enabled => _enabled;
+
+  final List<AudioPlayer> _sfxPool = [];
+  int _sfxIdx = 0;
+  final Map<String, AudioPlayer> _loops = {};
+  final Set<String> _missing = {};
+
+  Future<void> init() async {
+    final prefs = await SharedPreferences.getInstance();
+    _enabled = prefs.getBool(_prefsKey) ?? true;
+    for (var i = 0; i < _sfxPoolSize; i++) {
+      final p = AudioPlayer();
+      try {
+        await p.setReleaseMode(ReleaseMode.stop);
+        await p.setPlayerMode(PlayerMode.lowLatency);
+      } catch (_) {}
+      _sfxPool.add(p);
+    }
+  }
+
+  Future<void> setEnabled(bool v) async {
+    _enabled = v;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_prefsKey, v);
+    if (!v) await stopAll();
+  }
+
+  Future<void> sfx(String asset, {double volume = 1.0}) async {
+    if (!_enabled || _missing.contains(asset) || _sfxPool.isEmpty) return;
+    final p = _sfxPool[_sfxIdx];
+    _sfxIdx = (_sfxIdx + 1) % _sfxPool.length;
+    try {
+      await p.stop();
+      await p.setVolume(volume.clamp(0.0, 1.0));
+      await p.play(AssetSource('audio/$asset'));
+    } catch (_) {
+      _missing.add(asset);
+    }
+  }
+
+  Future<void> loop(String key, String asset, {double volume = 0.5}) async {
+    if (!_enabled) {
+      await stopLoop(key);
+      return;
+    }
+    if (_missing.contains(asset)) return;
+    var p = _loops[key];
+    try {
+      if (p == null) {
+        p = AudioPlayer();
+        await p.setReleaseMode(ReleaseMode.loop);
+        _loops[key] = p;
+      } else {
+        await p.stop();
+      }
+      await p.setVolume(volume.clamp(0.0, 1.0));
+      await p.play(AssetSource('audio/$asset'));
+    } catch (_) {
+      _missing.add(asset);
+      await stopLoop(key);
+    }
+  }
+
+  Future<void> stopLoop(String key) async {
+    final p = _loops.remove(key);
+    if (p == null) return;
+    try {
+      await p.stop();
+      await p.dispose();
+    } catch (_) {}
+  }
+
+  Future<void> stopAll() async {
+    for (final k in _loops.keys.toList()) {
+      await stopLoop(k);
+    }
+    for (final p in _sfxPool) {
+      try { await p.stop(); } catch (_) {}
+    }
+  }
+}
 
 const Color glovoYellow = Color(0xFFFFC244);
 const Color glovoDark = Color(0xFF13171F);
@@ -1142,6 +1241,7 @@ class _CourierHomeState extends State<CourierHome>
     _knockTimer?.cancel();
     _customerCallTimer?.cancel();
     _chatScheduleTimer?.cancel();
+    AudioService.instance.stopAll();
     super.dispose();
   }
 
@@ -1355,6 +1455,7 @@ class _CourierHomeState extends State<CourierHome>
     _lastShiftNet = _gross - _fuelCost;
     _lastShiftSeconds = _onlineSeconds;
     _resetTimers();
+    AudioService.instance.stopAll();
     setState(() {
       _state = CourierState.offline;
       _currentOrder = null;
@@ -1420,6 +1521,7 @@ class _CourierHomeState extends State<CourierHome>
             _vehicle = v;
             _state = CourierState.searching;
           });
+          AudioService.instance.loop('ambient', 'ambient_city.mp3', volume: 0.18);
           _startSimClock();
           _scheduleNextOrder();
         },
@@ -1554,7 +1656,7 @@ class _CourierHomeState extends State<CourierHome>
       _orderCountdown = 15;
     });
     HapticFeedback.heavyImpact();
-    SystemSound.play(SystemSoundType.alert);
+    AudioService.instance.sfx('order_incoming.mp3');
 
     _orderTimer = Timer.periodic(const Duration(seconds: 1), (t) {
       if (!mounted) return;
@@ -1573,6 +1675,7 @@ class _CourierHomeState extends State<CourierHome>
   void _acceptOrder() {
     _orderTimer?.cancel();
     HapticFeedback.mediumImpact();
+    AudioService.instance.sfx('button_tap.mp3', volume: 0.6);
     setState(() {
       _state = CourierState.toRestaurant;
       _routeProgress = 0;
@@ -1694,6 +1797,7 @@ class _CourierHomeState extends State<CourierHome>
 
   void _confirmItemsAndDrive() {
     HapticFeedback.mediumImpact();
+    AudioService.instance.sfx('button_tap.mp3', volume: 0.6);
     setState(() {
       _state = CourierState.toCustomer;
       _routeProgress = 0;
@@ -1714,7 +1818,7 @@ class _CourierHomeState extends State<CourierHome>
       if (!_chatOpen) _chatBadgeUnread = true;
     });
     HapticFeedback.mediumImpact();
-    SystemSound.play(SystemSoundType.alert);
+    AudioService.instance.sfx('chat_ding.mp3', volume: 0.7);
     if (!_chatOpen) {
       _showEventBanner('${_currentOrder?.customer ?? "Klient"}: nowa wiadomość',
           glovoBlue);
@@ -1757,6 +1861,7 @@ class _CourierHomeState extends State<CourierHome>
       }
       setState(() => _knockCount++);
       HapticFeedback.lightImpact();
+      AudioService.instance.sfx('knock.mp3');
       if (_knockCount >= 3) {
         t.cancel();
         _resolveCustomerOutcome();
@@ -1784,7 +1889,7 @@ class _CourierHomeState extends State<CourierHome>
         _state = CourierState.customerCalling;
       });
       HapticFeedback.mediumImpact();
-      SystemSound.play(SystemSoundType.alert);
+      AudioService.instance.sfx('phone_ring.mp3', volume: 0.8);
       _customerCallTimer = Timer(const Duration(milliseconds: 3500), () {
         if (!mounted) return;
         // 50% answers after call, 50% asks to leave at door
@@ -1818,7 +1923,7 @@ class _CourierHomeState extends State<CourierHome>
     o.tip = _rollTip(o);
     o.customerStars = _rollCustomerStars(o);
     HapticFeedback.heavyImpact();
-    SystemSound.play(SystemSoundType.click);
+    AudioService.instance.sfx('camera_shutter.mp3');
     setState(() {
       _state = CourierState.ratingPending;
       _starsRevealed = 0;
@@ -1928,9 +2033,11 @@ class _CourierHomeState extends State<CourierHome>
     if (_level > levelBefore) {
       _showEventBanner('Awans! Poziom $_level', glovoYellow);
       HapticFeedback.heavyImpact();
+      AudioService.instance.sfx('level_up.mp3');
+    } else {
+      AudioService.instance.sfx('cash.mp3');
     }
     HapticFeedback.heavyImpact();
-    SystemSound.play(SystemSoundType.click);
     _checkAchievements();
     _saveState();
 
@@ -2178,6 +2285,7 @@ class _CourierHomeState extends State<CourierHome>
     _showEventBanner('🏆 ${a.title}: +${a.reward.toStringAsFixed(0)} zł',
         glovoYellow);
     HapticFeedback.heavyImpact();
+    AudioService.instance.sfx('achievement.mp3');
     _saveState();
   }
 
@@ -2357,6 +2465,8 @@ class _CourierHomeState extends State<CourierHome>
           ? o.partnerAddress
           : o.customerAddress);
     });
+    AudioService.instance
+        .loop('engine', 'engine_${_vehicle.name}.mp3', volume: 0.45);
 
     _progressTimer = Timer.periodic(const Duration(milliseconds: 100), (t) {
       if (!mounted) {
@@ -2417,7 +2527,7 @@ class _CourierHomeState extends State<CourierHome>
           _trafficLightSec = 3 + _rng.nextInt(4);
         });
         HapticFeedback.mediumImpact();
-        SystemSound.play(SystemSoundType.alert);
+        AudioService.instance.sfx('traffic_light.mp3', volume: 0.7);
         return;
       }
       if (!phoneTriggered &&
@@ -2456,6 +2566,7 @@ class _CourierHomeState extends State<CourierHome>
       });
       if (step >= totalSteps) {
         t.cancel();
+        AudioService.instance.stopLoop('engine');
         setState(() {
           _currentSpeedKmh = 0;
           _currentTurn = null;
@@ -4059,6 +4170,49 @@ class _CourierHomeState extends State<CourierHome>
         ),
         const SizedBox(height: 8),
         ..._gearCatalog.map(_gearRow),
+        const SizedBox(height: 18),
+
+        // ===== Settings =====
+        Row(
+          children: [
+            const Icon(Icons.settings_rounded,
+                color: glovoMuted, size: 18),
+            const SizedBox(width: 6),
+            const Text('Ustawienia',
+                style:
+                    TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Container(
+          decoration: BoxDecoration(
+            color: glovoCard,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: SwitchListTile(
+            title: const Text('Dźwięk',
+                style:
+                    TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+            subtitle: const Text(
+                'Silnik, dzwonek, klakson, kasa',
+                style: TextStyle(color: glovoMuted, fontSize: 11)),
+            secondary: Icon(
+              AudioService.instance.enabled
+                  ? Icons.volume_up_rounded
+                  : Icons.volume_off_rounded,
+              color: AudioService.instance.enabled
+                  ? glovoYellow
+                  : glovoMuted,
+            ),
+            value: AudioService.instance.enabled,
+            activeThumbColor: glovoYellow,
+            onChanged: (v) async {
+              await AudioService.instance.setEnabled(v);
+              if (!mounted) return;
+              setState(() {});
+            },
+          ),
+        ),
         const SizedBox(height: 18),
 
         // ===== Reset =====
