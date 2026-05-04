@@ -4046,23 +4046,12 @@ class _CourierHomeState extends State<CourierHome>
 
   Widget _seasonChip() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+      padding: const EdgeInsets.all(6),
       decoration: BoxDecoration(
         color: _season.color.withValues(alpha: 0.18),
         borderRadius: BorderRadius.circular(20),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(_season.emoji, style: const TextStyle(fontSize: 12)),
-          const SizedBox(width: 3),
-          Text(_season.label,
-              style: TextStyle(
-                  color: _season.color,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 10)),
-        ],
-      ),
+      child: Text(_season.emoji, style: const TextStyle(fontSize: 14)),
     );
   }
 
