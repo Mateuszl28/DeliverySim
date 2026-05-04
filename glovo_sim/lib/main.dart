@@ -1235,6 +1235,15 @@ class _CourierHomeState extends State<CourierHome>
   // Saved route callback for resuming after a breakdown decision
   VoidCallback? _pendingRouteCallback;
 
+  // Quick-start mini-game (tap-when-bar-in-green at route start)
+  bool _quickStartActive = false;
+  double _quickStartProgress = 0;
+  bool _quickStartConsumed = false;
+  Timer? _quickStartTimer;
+  // Sweet spot in [0,1]; tap inside this window for boost
+  static const double _quickStartLow = 0.62;
+  static const double _quickStartHigh = 0.84;
+
   // Last shift snapshot, captured when ending a shift
   int? _lastShiftDeliveries;
   double? _lastShiftNet;
@@ -1695,6 +1704,7 @@ class _CourierHomeState extends State<CourierHome>
     _knockTimer?.cancel();
     _customerCallTimer?.cancel();
     _chatScheduleTimer?.cancel();
+    _quickStartTimer?.cancel();
     AudioService.instance.stopAll();
     super.dispose();
   }
@@ -2703,7 +2713,7 @@ class _CourierHomeState extends State<CourierHome>
   }
 
   void _switchZone(Zone z) {
-    if (z.unlockLevel > _level) return;
+    if (!_isZoneUnlocked(z)) return;
     if (_state != CourierState.offline) {
       _toast('Zmień strefę gdy jesteś offline', glovoOrange);
       return;
