@@ -7155,8 +7155,7 @@ class _CourierHomeState extends State<CourierHome>
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis),
                       Text(
-                          'Znajdź mieszkanie ${_correctApartment} '
-                          '(klatka)',
+                          'Znajdź mieszkanie $_correctApartment (klatka)',
                           style: const TextStyle(
                               color: glovoMuted, fontSize: 11)),
                     ],
