@@ -4506,6 +4506,33 @@ class _CourierHomeState extends State<CourierHome>
         ..._gearCatalog.map(_gearRow),
         const SizedBox(height: 18),
 
+        // ===== Vehicle Service =====
+        Row(
+          children: [
+            const Icon(Icons.build_rounded,
+                color: glovoOrange, size: 18),
+            const SizedBox(width: 6),
+            const Text('Stan pojazdów',
+                style:
+                    TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: glovoCard,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Column(
+            children: Vehicle.values
+                .where((v) => v != Vehicle.bike)
+                .map(_vehicleServiceRow)
+                .toList(),
+          ),
+        ),
+        const SizedBox(height: 18),
+
         // ===== Settings =====
         Row(
           children: [
