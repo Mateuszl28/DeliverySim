@@ -404,6 +404,14 @@ enum AchievementKind {
   ownAllGear,
   fiveStarStreak,
   loginStreak,
+  // v9-v10
+  vehicleServiced,
+  duelsWon,
+  quickStartHits,
+  vipCustomers,
+  apartmentPerfectStreak,
+  redLightSurvived,
+  careerComplete,
 }
 
 class Achievement {
@@ -555,6 +563,71 @@ const _achievements = [
       reward: 35,
       kind: AchievementKind.loginStreak,
       threshold: 7),
+  // v9-v10
+  Achievement(
+      id: 'first_service',
+      title: 'Mechanik',
+      desc: 'Pierwszy raz w serwisie',
+      icon: Icons.build_rounded,
+      reward: 10,
+      kind: AchievementKind.vehicleServiced,
+      threshold: 1),
+  Achievement(
+      id: 'rival_killer',
+      title: 'Pogromca rywali',
+      desc: 'Wygraj 5 pojedynków dnia',
+      icon: Icons.sports_kabaddi_rounded,
+      reward: 50,
+      kind: AchievementKind.duelsWon,
+      threshold: 5),
+  Achievement(
+      id: 'rival_legend',
+      title: 'Legenda rynku',
+      desc: 'Wygraj 25 pojedynków dnia',
+      icon: Icons.military_tech_rounded,
+      reward: 200,
+      kind: AchievementKind.duelsWon,
+      threshold: 25),
+  Achievement(
+      id: 'quick_start_pro',
+      title: 'Szybki start',
+      desc: '25× trafienie w żółtą strefę',
+      icon: Icons.bolt_rounded,
+      reward: 40,
+      kind: AchievementKind.quickStartHits,
+      threshold: 25),
+  Achievement(
+      id: 'vip_handler',
+      title: 'VIP handler',
+      desc: 'Dowieź 10 VIP klientom',
+      icon: Icons.workspace_premium_rounded,
+      reward: 60,
+      kind: AchievementKind.vipCustomers,
+      threshold: 10),
+  Achievement(
+      id: 'door_master',
+      title: 'Mistrz drzwi',
+      desc: '15× znajdź mieszkanie za 1 razem z rzędu',
+      icon: Icons.door_front_door_rounded,
+      reward: 45,
+      kind: AchievementKind.apartmentPerfectStreak,
+      threshold: 15),
+  Achievement(
+      id: 'red_light_runner',
+      title: 'Złota stopa',
+      desc: '10× przejedź na czerwonym bez mandatu',
+      icon: Icons.traffic_rounded,
+      reward: 55,
+      kind: AchievementKind.redLightSurvived,
+      threshold: 10),
+  Achievement(
+      id: 'career_complete',
+      title: 'Top Kurier Dzielnicy',
+      desc: 'Ukończ wszystkie misje kariery',
+      icon: Icons.emoji_events_rounded,
+      reward: 500,
+      kind: AchievementKind.careerComplete,
+      threshold: 1),
 ];
 
 class WeeklyChallenge {
@@ -1232,6 +1305,20 @@ class _CourierHomeState extends State<CourierHome>
   int _duelsWon = 0;
   int _duelsLost = 0;
 
+  // v11 — achievement counters for v9-v10 systems
+  int _vehicleServicedCount = 0;
+  int _quickStartHitCount = 0;
+  int _vipCustomersCount = 0;
+  int _apartmentPerfectStreak = 0;
+  int _redLightSurvivedCount = 0;
+
+  // Restaurant familiarity — partner name → delivery count
+  final Map<String, int> _restaurantVisits = {};
+
+  // News ticker
+  int _newsIndex = 0;
+  Timer? _newsTimer;
+
   // Saved route callback for resuming after a breakdown decision
   VoidCallback? _pendingRouteCallback;
 
@@ -1332,7 +1419,29 @@ class _CourierHomeState extends State<CourierHome>
     _season = Season.currentForDate(DateTime.now());
     _career = _buildCareerMissions();
     _loadState();
+    _newsTimer = Timer.periodic(const Duration(seconds: 9), (_) {
+      if (!mounted) return;
+      setState(() => _newsIndex = (_newsIndex + 1) % _newsItems.length);
+    });
   }
+
+  static const _newsItems = [
+    '📰 Inflacja w Warszawie: ceny paliw +3% w tym tygodniu',
+    '🏆 Glovo Cup: top kurierzy walczą o nagrody',
+    '🍕 Nowa restauracja w Centrum: Pizzeria Romana',
+    '☔ Pogodynka: weekend w deszczu — peak earnings',
+    '🛵 Akcja "Zielony Glovo": rower 0 emisji = +5% bonus',
+    '👮 Policja zwiększa kontrole rowerzystów na Mokotowie',
+    '🎤 Koncert Sanah: ruch wzmożony w okolicach PGE',
+    '🚧 Remont na Marszałkowskiej do końca miesiąca',
+    '⛅ ZUS: nowe progi dla samozatrudnionych — sprawdź',
+    '🚲 W "Rower Roku" wybrano model zaprojektowany w Polsce',
+    '🍔 Promocja: McDonald\'s podwaja napiwki kurierskie',
+    '🌧️ Synoptycy: ulewa zbliża się od zachodu',
+    '🍣 Sushi Wok otwiera 3. lokal w Wilanowie',
+    '🚦 Smart City: nowe inteligentne światła w Centrum',
+    '📦 Boom paczkowy: InPost rekrutuje 200 kurierów',
+  ];
 
   CareerMission? get _currentCareerMission =>
       _careerProgress < _career.length ? _career[_careerProgress] : null;
@@ -1474,6 +1583,16 @@ class _CourierHomeState extends State<CourierHome>
       }
       _duelsWon = p.getInt('duelsWon') ?? 0;
       _duelsLost = p.getInt('duelsLost') ?? 0;
+      _vehicleServicedCount = p.getInt('vehicleServicedCount') ?? 0;
+      _quickStartHitCount = p.getInt('quickStartHitCount') ?? 0;
+      _vipCustomersCount = p.getInt('vipCustomersCount') ?? 0;
+      _apartmentPerfectStreak = p.getInt('apartmentPerfectStreak') ?? 0;
+      _redLightSurvivedCount = p.getInt('redLightSurvivedCount') ?? 0;
+      final rvJson = p.getString('restaurantVisits');
+      if (rvJson != null) {
+        final m = jsonDecode(rvJson) as Map<String, dynamic>;
+        m.forEach((k, v) => _restaurantVisits[k] = v as int);
+      }
 
       final weeklyJson = p.getString('weekly');
       if (weeklyJson != null) {
@@ -1616,6 +1735,12 @@ class _CourierHomeState extends State<CourierHome>
     }
     await p.setInt('duelsWon', _duelsWon);
     await p.setInt('duelsLost', _duelsLost);
+    await p.setInt('vehicleServicedCount', _vehicleServicedCount);
+    await p.setInt('quickStartHitCount', _quickStartHitCount);
+    await p.setInt('vipCustomersCount', _vipCustomersCount);
+    await p.setInt('apartmentPerfectStreak', _apartmentPerfectStreak);
+    await p.setInt('redLightSurvivedCount', _redLightSurvivedCount);
+    await p.setString('restaurantVisits', jsonEncode(_restaurantVisits));
   }
 
   Future<void> _resetProgress() async {
@@ -1659,6 +1784,12 @@ class _CourierHomeState extends State<CourierHome>
       _activeDuel = null;
       _duelsWon = 0;
       _duelsLost = 0;
+      _vehicleServicedCount = 0;
+      _quickStartHitCount = 0;
+      _vipCustomersCount = 0;
+      _apartmentPerfectStreak = 0;
+      _redLightSurvivedCount = 0;
+      _restaurantVisits.clear();
       _history.clear();
       _stackedOrder = null;
       _pendingStackOffer = null;
@@ -1705,6 +1836,7 @@ class _CourierHomeState extends State<CourierHome>
     _customerCallTimer?.cancel();
     _chatScheduleTimer?.cancel();
     _quickStartTimer?.cancel();
+    _newsTimer?.cancel();
     AudioService.instance.stopAll();
     super.dispose();
   }
@@ -2137,6 +2269,9 @@ class _CourierHomeState extends State<CourierHome>
     final dist = 0.6 + _rng.nextDouble() * 3.4;
     var basePay = 5.50 + dist * 2.10 + _rng.nextDouble() * 1.5;
     basePay *= _zone.payoutMul;
+    final rep = _restaurantRep(partner.$1);
+    // Reputation [1.5..5.0] mapped to pay multiplier [0.92..1.10]
+    basePay *= 0.92 + ((rep - 1.5) / 3.5) * 0.18;
     if (_ownedGear.contains('rack')) basePay += 1.0;
     if (_weather.isRainy && _ownedGear.contains('raincoat')) {
       basePay *= 1.10;
@@ -2147,8 +2282,13 @@ class _CourierHomeState extends State<CourierHome>
         : cat == OrderCategory.grocery
             ? 3 + _rng.nextInt(5)
             : 2 + _rng.nextInt(4);
+    // High rep = faster, more consistent prep
+    final repPrepMul = 1.4 - ((rep - 1.5) / 3.5) * 0.6; // [0.8 .. 1.4]
+    prep = (prep * repPrepMul).round().clamp(2, 14);
     if (_ownedGear.contains('vip')) prep = (prep * 0.7).ceil();
-    final willCancel = !isRegular && _rng.nextDouble() < 0.06;
+    // Low rep = more cancels (3% to 12%); high rep = barely any cancels
+    final cancelChance = 0.12 - ((rep - 1.5) / 3.5) * 0.10;
+    final willCancel = !isRegular && _rng.nextDouble() < cancelChance;
     final ctype = _generateCustomerType(isRegular: isRegular);
 
     setState(() {
@@ -2382,6 +2522,12 @@ class _CourierHomeState extends State<CourierHome>
     if (n == _correctApartment) {
       AudioService.instance.sfx('button_tap.mp3', volume: 0.5);
       HapticFeedback.lightImpact();
+      if (_wrongApartmentTries == 0) {
+        _apartmentPerfectStreak++;
+        _checkAchievements();
+      } else {
+        _apartmentPerfectStreak = 0;
+      }
       _enterCustomerKnocking();
     } else {
       setState(() => _wrongApartmentTries++);
@@ -2516,6 +2662,16 @@ class _CourierHomeState extends State<CourierHome>
     return double.parse(tip.toStringAsFixed(2));
   }
 
+  // ===== RESTAURANT REPUTATIONS =====
+  // Deterministic 1.5-5.0 score per restaurant name.
+  double _restaurantRep(String partner) {
+    final h = partner.hashCode.abs();
+    return 1.5 + ((h % 71) / 20.0); // [1.5, 5.0]
+  }
+
+  bool _restaurantKnown(String partner) =>
+      (_restaurantVisits[partner] ?? 0) >= 3;
+
   CustomerType _generateCustomerType({required bool isRegular}) {
     if (isRegular) {
       final r = _rng.nextDouble();
@@ -2581,6 +2737,8 @@ class _CourierHomeState extends State<CourierHome>
       if (o.weatherAtPickup.isRainy) _rainDeliveries++;
       if (o.surge >= 1.4) _peakDeliveries++;
       _categoriesDelivered.add(o.category);
+      if (o.customerType == CustomerType.vip) _vipCustomersCount++;
+      _restaurantVisits[o.partner] = (_restaurantVisits[o.partner] ?? 0) + 1;
       if (o.customerStars == 5) {
         _fiveStarTotal++;
         _fiveStarStreak++;
@@ -2961,6 +3119,20 @@ class _CourierHomeState extends State<CourierHome>
           unlocked = _fiveStarStreak >= a.threshold;
         case AchievementKind.loginStreak:
           unlocked = _loginStreak >= a.threshold;
+        case AchievementKind.vehicleServiced:
+          unlocked = _vehicleServicedCount >= a.threshold;
+        case AchievementKind.duelsWon:
+          unlocked = _duelsWon >= a.threshold;
+        case AchievementKind.quickStartHits:
+          unlocked = _quickStartHitCount >= a.threshold;
+        case AchievementKind.vipCustomers:
+          unlocked = _vipCustomersCount >= a.threshold;
+        case AchievementKind.apartmentPerfectStreak:
+          unlocked = _apartmentPerfectStreak >= a.threshold;
+        case AchievementKind.redLightSurvived:
+          unlocked = _redLightSurvivedCount >= a.threshold;
+        case AchievementKind.careerComplete:
+          unlocked = _careerProgress >= _career.length;
       }
       if (unlocked) _unlockAchievement(a);
     }
@@ -3335,8 +3507,10 @@ class _CourierHomeState extends State<CourierHome>
     });
     HapticFeedback.heavyImpact();
     if (hit) {
+      _quickStartHitCount++;
       AudioService.instance.sfx('cash.mp3', volume: 0.5);
       _showEventBanner('💨 Quick start! −15% czasu trasy', glovoYellow);
+      _checkAchievements();
     } else {
       AudioService.instance.sfx('button_tap.mp3', volume: 0.4);
     }
@@ -3576,7 +3750,9 @@ class _CourierHomeState extends State<CourierHome>
       _fuelCost += cost; // bookkeep as overhead, not consumed fuel — but it's a real expense
       _kmDriven[_vehicle.name] = 0;
       _breakdownActive = false;
+      _vehicleServicedCount++;
     });
+    _checkAchievements();
     AudioService.instance.sfx('cash.mp3', volume: 0.7);
     _showEventBanner(
         'Serwis: −${cost.toStringAsFixed(2)} zł — jedziemy dalej',
@@ -3672,6 +3848,9 @@ class _CourierHomeState extends State<CourierHome>
           children: [
             _buildHeader(),
             if (_eventBanner != null) _eventBannerWidget(),
+            if (_state == CourierState.offline ||
+                _state == CourierState.searching)
+              _newsTickerStrip(),
             Expanded(child: _buildTabContent()),
             if (_tabIndex == 0) _buildBottomBar(),
             _buildBottomNav(),
@@ -4200,15 +4379,9 @@ class _CourierHomeState extends State<CourierHome>
                         Text(_rating.toStringAsFixed(2),
                             style: const TextStyle(
                                 color: glovoMuted, fontSize: 12)),
-                        const SizedBox(width: 8),
+                        const SizedBox(width: 6),
                         Icon(Icons.circle,
                             size: 7, color: online ? glovoGreen : glovoMuted),
-                        const SizedBox(width: 3),
-                        Text(online ? 'Online' : 'Offline',
-                            style: TextStyle(
-                                color: online ? glovoGreen : glovoMuted,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600)),
                       ],
                     ),
                   ],
@@ -4261,6 +4434,42 @@ class _CourierHomeState extends State<CourierHome>
     );
   }
 
+  Widget _newsTickerStrip() {
+    final headline = _newsItems[_newsIndex % _newsItems.length];
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 350),
+      transitionBuilder: (child, anim) =>
+          FadeTransition(opacity: anim, child: child),
+      child: Container(
+        key: ValueKey(_newsIndex),
+        margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+        padding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: glovoCardLight,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+              color: glovoBlue.withValues(alpha: 0.25), width: 1),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.bolt_rounded, color: glovoBlue, size: 14),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(headline,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _seasonChip() {
     return Container(
       padding: const EdgeInsets.all(6),
@@ -4274,23 +4483,12 @@ class _CourierHomeState extends State<CourierHome>
 
   Widget _weatherChip() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      padding: const EdgeInsets.all(6),
       decoration: BoxDecoration(
         color: _weather.color.withValues(alpha: 0.18),
         borderRadius: BorderRadius.circular(20),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(_weather.icon, color: _weather.color, size: 16),
-          const SizedBox(width: 4),
-          Text(_weather.label,
-              style: TextStyle(
-                  color: _weather.color,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 11)),
-        ],
-      ),
+      child: Icon(_weather.icon, color: _weather.color, size: 16),
     );
   }
 
@@ -4340,17 +4538,9 @@ class _CourierHomeState extends State<CourierHome>
         color: glovoCardLight,
         borderRadius: BorderRadius.circular(20),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.access_time_rounded,
-              color: glovoMuted, size: 14),
-          const SizedBox(width: 4),
-          Text(_simClock,
-              style: const TextStyle(
-                  fontWeight: FontWeight.w700, fontSize: 12)),
-        ],
-      ),
+      child: Text(_simClock,
+          style: const TextStyle(
+              fontWeight: FontWeight.w700, fontSize: 12)),
     );
   }
 
@@ -6342,11 +6532,13 @@ class _CourierHomeState extends State<CourierHome>
               setState(() {
                 _fuelCost += cost;
                 _kmDriven[v.name] = 0;
+                _vehicleServicedCount++;
               });
               AudioService.instance.sfx('cash.mp3', volume: 0.7);
               _showEventBanner(
                   '${v.label}: zserwisowany za ${cost.toStringAsFixed(2)} zł',
                   glovoGreen);
+              _checkAchievements();
               _saveState();
             },
             child: const Text('Zapłać',
@@ -6829,7 +7021,10 @@ class _CourierHomeState extends State<CourierHome>
                 ],
                 const SizedBox(height: 14),
                 _routePoint(o.category.icon, o.category.color, o.partner,
-                    o.partnerAddress),
+                    o.partnerAddress,
+                    rep: _restaurantKnown(o.partner)
+                        ? _restaurantRep(o.partner)
+                        : null),
                 Padding(
                   padding: const EdgeInsets.only(left: 19),
                   child: Container(width: 2, height: 22, color: glovoMuted),
@@ -6868,8 +7063,44 @@ class _CourierHomeState extends State<CourierHome>
     );
   }
 
+  Widget _repStars(double rep) {
+    final filled = rep.floor();
+    final hasHalf = (rep - filled) >= 0.5;
+    final color = rep >= 4
+        ? glovoGreen
+        : rep >= 3
+            ? glovoYellow
+            : glovoOrange;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var i = 0; i < 5; i++)
+          Icon(
+            i < filled
+                ? Icons.star_rounded
+                : (i == filled && hasHalf
+                    ? Icons.star_half_rounded
+                    : Icons.star_outline_rounded),
+            size: 12,
+            color: color,
+          ),
+        const SizedBox(width: 4),
+        Text('partner ${rep.toStringAsFixed(1)}',
+            style: TextStyle(
+                color: color,
+                fontSize: 10,
+                fontWeight: FontWeight.w700)),
+      ],
+    );
+  }
+
+  Widget _restaurantRepBar(String partner) {
+    return _repStars(_restaurantRep(partner));
+  }
+
   Widget _routePoint(
-      IconData icon, Color color, String title, String addr) {
+      IconData icon, Color color, String title, String addr,
+      {double? rep}) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -6888,11 +7119,19 @@ class _CourierHomeState extends State<CourierHome>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                       fontWeight: FontWeight.w700, fontSize: 15)),
               const SizedBox(height: 2),
               Text(addr,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(color: glovoMuted, fontSize: 12)),
+              if (rep != null) ...[
+                const SizedBox(height: 4),
+                _repStars(rep),
+              ],
             ],
           ),
         ),
@@ -7365,8 +7604,10 @@ class _CourierHomeState extends State<CourierHome>
           'Mandat za czerwone: −${fine.toStringAsFixed(0)} zł, ocena spada',
           glovoRed);
     } else {
+      setState(() => _redLightSurvivedCount++);
       AudioService.instance.sfx('cash.mp3', volume: 0.4);
       _showEventBanner('Przejechałeś — czysto', glovoGreen);
+      _checkAchievements();
     }
   }
 
@@ -7550,6 +7791,10 @@ class _CourierHomeState extends State<CourierHome>
                     fontSize: 18, fontWeight: FontWeight.w800)),
             Text(o.partnerAddress,
                 style: const TextStyle(color: glovoMuted, fontSize: 13)),
+            if (_restaurantKnown(o.partner)) ...[
+              const SizedBox(height: 4),
+              _restaurantRepBar(o.partner),
+            ],
             if (queuePos > 0) ...[
               const SizedBox(height: 10),
               Container(
