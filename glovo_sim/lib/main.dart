@@ -7118,6 +7118,114 @@ class _CourierHomeState extends State<CourierHome>
     );
   }
 
+  Widget _findApartmentView() {
+    final o = _currentOrder!;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: glovoCard,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                  color: glovoYellow.withValues(alpha: 0.4), width: 1),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: glovoYellow.withValues(alpha: 0.18),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.apartment_rounded,
+                      color: glovoYellow, size: 24),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(o.customerAddress,
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w800, fontSize: 13),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis),
+                      Text(
+                          'Znajdź mieszkanie ${_correctApartment} '
+                          '(klatka)',
+                          style: const TextStyle(
+                              color: glovoMuted, fontSize: 11)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.symmetric(
+                horizontal: 14, vertical: 8),
+            decoration: BoxDecoration(
+              color: glovoYellow.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(
+                'Mieszkanie ${_correctApartment}'
+                '${_wrongApartmentTries > 0 ? " · pomyłki: ${_wrongApartmentTries}/3" : ""}',
+                style: const TextStyle(
+                    color: glovoYellow,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 13)),
+          ),
+          const SizedBox(height: 16),
+          Expanded(
+            child: GridView.builder(
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 4,
+                childAspectRatio: 0.85,
+                crossAxisSpacing: 10,
+                mainAxisSpacing: 10,
+              ),
+              itemCount: _apartmentDoors.length,
+              itemBuilder: (ctx, i) {
+                final n = _apartmentDoors[i];
+                return InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: () => _pickApartment(n),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: glovoCardLight,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                          color: glovoMuted.withValues(alpha: 0.3),
+                          width: 1),
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.door_front_door_rounded,
+                            color: glovoYellow, size: 30),
+                        const SizedBox(height: 4),
+                        Text('$n',
+                            style: const TextStyle(
+                                fontWeight: FontWeight.w900,
+                                fontSize: 17)),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _atCustomerView() {
     final o = _currentOrder!;
     return Center(
