@@ -1490,19 +1490,34 @@ class _CourierHomeState extends State<CourierHome>
   }
 
   List<LeaderboardEntry> _generateGhostBoard() {
+    final entries = <LeaderboardEntry>[];
+    // Named rivals — they always show up, with believable stats
+    for (final r in _rivals) {
+      final variance = 0.85 + _rng.nextDouble() * 0.6;
+      final weeklyNet = r.dailyAvg * 5.5 * variance;
+      final deliveries = (weeklyNet / 8).round() + _rng.nextInt(8);
+      entries.add(LeaderboardEntry(
+        name: r.name,
+        weeklyNet: double.parse(weeklyNet.toStringAsFixed(2)),
+        deliveries: deliveries,
+        level: r.level + _rng.nextInt(3) - 1,
+      ));
+    }
+    // Plus a few random ghosts to fill in
     final names = List<String>.from(_ghostNames);
     names.shuffle(_rng);
-    return names.take(9).map((n) {
+    for (final n in names.take(5)) {
       final earnings = 60 + _rng.nextDouble() * 280;
       final deliveries = 8 + _rng.nextInt(40);
       final lvl = 1 + _rng.nextInt(12);
-      return LeaderboardEntry(
+      entries.add(LeaderboardEntry(
         name: n,
         weeklyNet: double.parse(earnings.toStringAsFixed(2)),
         deliveries: deliveries,
         level: lvl,
-      );
-    }).toList();
+      ));
+    }
+    return entries;
   }
 
   Future<void> _saveState() async {
