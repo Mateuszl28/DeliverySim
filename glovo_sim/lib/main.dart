@@ -2510,6 +2510,9 @@ class _CourierHomeState extends State<CourierHome>
             glovoPurple);
       }
       _hourlyEarnings[_simHour] = (_hourlyEarnings[_simHour] ?? 0) + net;
+      if (_activeDuel != null && !_activeDuel!.resolved) {
+        _activeDuel!.progressNet += net;
+      }
       _weeklyNet += net;
       _weeklyDeliveries++;
       _xp += xpGain;
