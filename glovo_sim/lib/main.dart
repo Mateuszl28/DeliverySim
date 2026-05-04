@@ -1435,6 +1435,14 @@ class _CourierHomeState extends State<CourierHome>
       _careerUnlockedZones
           .addAll(p.getStringList('careerUnlockedZones') ?? []);
 
+      final duelJson = p.getString('activeDuel');
+      if (duelJson != null) {
+        _activeDuel = DailyDuel.fromJson(
+            jsonDecode(duelJson) as Map<String, dynamic>);
+      }
+      _duelsWon = p.getInt('duelsWon') ?? 0;
+      _duelsLost = p.getInt('duelsLost') ?? 0;
+
       final weeklyJson = p.getString('weekly');
       if (weeklyJson != null) {
         final m = jsonDecode(weeklyJson) as Map<String, dynamic>;
@@ -1554,6 +1562,13 @@ class _CourierHomeState extends State<CourierHome>
     await p.setInt('careerProgress', _careerProgress);
     await p.setStringList(
         'careerUnlockedZones', _careerUnlockedZones.toList());
+    if (_activeDuel != null) {
+      await p.setString('activeDuel', jsonEncode(_activeDuel!.toJson()));
+    } else {
+      await p.remove('activeDuel');
+    }
+    await p.setInt('duelsWon', _duelsWon);
+    await p.setInt('duelsLost', _duelsLost);
   }
 
   Future<void> _resetProgress() async {
@@ -1594,6 +1609,9 @@ class _CourierHomeState extends State<CourierHome>
       _breakdownActive = false;
       _careerProgress = 0;
       _careerUnlockedZones.clear();
+      _activeDuel = null;
+      _duelsWon = 0;
+      _duelsLost = 0;
       _history.clear();
       _stackedOrder = null;
       _pendingStackOffer = null;
