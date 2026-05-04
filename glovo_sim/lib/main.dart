@@ -4589,6 +4589,24 @@ class _CourierHomeState extends State<CourierHome>
         ),
         const SizedBox(height: 18),
 
+        // ===== Career =====
+        Row(
+          children: [
+            const Icon(Icons.workspace_premium_rounded,
+                color: glovoYellow, size: 18),
+            const SizedBox(width: 6),
+            const Text('Kariera',
+                style:
+                    TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+            const Spacer(),
+            Text('${_careerProgress}/${_career.length}',
+                style: const TextStyle(color: glovoMuted, fontSize: 12)),
+          ],
+        ),
+        const SizedBox(height: 8),
+        _careerCard(),
+        const SizedBox(height: 18),
+
         // ===== Login Streak =====
         if (_loginStreak > 0) ...[
           Container(
