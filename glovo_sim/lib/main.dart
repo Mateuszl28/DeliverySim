@@ -3927,6 +3927,8 @@ class _CourierHomeState extends State<CourierHome>
         return _itemsCheckView();
       case CourierState.orderCancelled:
         return _cancelledView();
+      case CourierState.findingApartment:
+        return _findApartmentView();
       case CourierState.atCustomer:
         return _atCustomerView();
       case CourierState.customerCalling:
