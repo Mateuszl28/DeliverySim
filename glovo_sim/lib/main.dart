@@ -5012,6 +5012,127 @@ class _CourierHomeState extends State<CourierHome>
     );
   }
 
+  Widget _vehicleServiceRow(Vehicle v) {
+    final km = _kmDriven[v.name] ?? 0;
+    final threshold = v == Vehicle.scooter ? 60.0 : 120.0;
+    final wear = (km / (threshold * 2)).clamp(0.0, 1.0);
+    final base = v == Vehicle.scooter ? 25.0 : 45.0;
+    final cost = base + km * 0.15;
+    final net = _gross - _fuelCost;
+    final canAfford = net >= cost;
+    final wearColor = wear < 0.4
+        ? glovoGreen
+        : wear < 0.75
+            ? glovoOrange
+            : glovoRed;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: glovoCardLight,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(v.icon, color: glovoYellow, size: 20),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(v.label,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w700, fontSize: 13)),
+                    const SizedBox(width: 6),
+                    Text('${km.toStringAsFixed(1)} km',
+                        style: const TextStyle(
+                            color: glovoMuted, fontSize: 11)),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: LinearProgressIndicator(
+                    value: wear,
+                    minHeight: 5,
+                    backgroundColor: glovoCardLight,
+                    valueColor: AlwaysStoppedAnimation(wearColor),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          ElevatedButton(
+            onPressed: km < 1 || !canAfford
+                ? null
+                : () => _confirmManualService(v, cost),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: glovoYellow,
+              foregroundColor: glovoDark,
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 12, vertical: 8),
+              minimumSize: const Size(0, 36),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            child: Text(
+              km < 1 ? 'OK' : '${cost.toStringAsFixed(0)} zł',
+              style: const TextStyle(
+                  fontWeight: FontWeight.w800, fontSize: 12),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _confirmManualService(Vehicle v, double cost) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: glovoCard,
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('Serwis ${v.label.toLowerCase()}',
+            style: const TextStyle(fontWeight: FontWeight.w900)),
+        content: Text(
+            'Zapłacić ${cost.toStringAsFixed(2)} zł i wyzerować zużycie pojazdu?',
+            style: const TextStyle(color: glovoMuted)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Anuluj',
+                style: TextStyle(color: glovoMuted)),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              setState(() {
+                _fuelCost += cost;
+                _kmDriven[v.name] = 0;
+              });
+              AudioService.instance.sfx('cash.mp3', volume: 0.7);
+              _showEventBanner(
+                  '${v.label}: zserwisowany za ${cost.toStringAsFixed(2)} zł',
+                  glovoGreen);
+              _saveState();
+            },
+            child: const Text('Zapłać',
+                style: TextStyle(
+                    color: glovoYellow, fontWeight: FontWeight.w800)),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _gearRow(GearItem g) {
     final owned = _ownedGear.contains(g.id);
     final net = _gross - _fuelCost;
