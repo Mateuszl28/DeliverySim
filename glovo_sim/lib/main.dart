@@ -2677,6 +2677,118 @@ class _CourierHomeState extends State<CourierHome>
       if (!mounted) return;
       _showLoginBonusDialog(newStreak, bonus);
     });
+
+    _resolveAndSpawnDuel(today);
+  }
+
+  // ===== DAILY RIVAL DUEL =====
+  Rival _rivalById(String id) =>
+      _rivals.firstWhere((r) => r.id == id, orElse: () => _rivals.first);
+
+  void _resolveAndSpawnDuel(String today) {
+    // Resolve previous duel if any
+    final prev = _activeDuel;
+    if (prev != null && !prev.resolved && prev.dateKey != today) {
+      final won = prev.progressNet >= prev.targetNet;
+      final reward = won ? double.parse(
+          (prev.targetNet * 0.15 + 20).toStringAsFixed(2)) : 0.0;
+      setState(() {
+        prev.resolved = true;
+        if (won) {
+          _duelsWon++;
+          _gross += reward;
+        } else {
+          _duelsLost++;
+        }
+      });
+      Timer(const Duration(milliseconds: 1200), () {
+        if (!mounted) return;
+        _showDuelResultDialog(prev, won, reward);
+      });
+    }
+
+    // Spawn new duel for today (if none yet matching today)
+    if (_activeDuel == null || _activeDuel!.dateKey != today) {
+      final rival = _rivals[_rng.nextInt(_rivals.length)];
+      // Target = rival's daily avg, scaled by player's level (so it stays relevant)
+      final levelScale = 0.6 + (_level * 0.06).clamp(0.0, 0.7);
+      final variance = 0.85 + _rng.nextDouble() * 0.30;
+      final target = double.parse(
+          (rival.dailyAvg * levelScale * variance).toStringAsFixed(2));
+      setState(() {
+        _activeDuel = DailyDuel(
+          rivalId: rival.id,
+          targetNet: target,
+          dateKey: today,
+        );
+      });
+      _saveState();
+    }
+  }
+
+  void _showDuelResultDialog(DailyDuel d, bool won, double reward) {
+    final r = _rivalById(d.rivalId);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: glovoCard,
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Text(r.emoji, style: const TextStyle(fontSize: 24)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(won ? 'Pokonałeś rywala!' : 'Rywal Cię ograł',
+                  style: const TextStyle(fontWeight: FontWeight.w900)),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(r.name,
+                style: const TextStyle(
+                    fontWeight: FontWeight.w800, fontSize: 14)),
+            const SizedBox(height: 4),
+            Text('Cel: ${d.targetNet.toStringAsFixed(2)} zł',
+                style: const TextStyle(color: glovoMuted, fontSize: 12)),
+            Text('Twój wynik: ${d.progressNet.toStringAsFixed(2)} zł',
+                style: TextStyle(
+                    color: won ? glovoGreen : glovoRed,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 14)),
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: glovoCardLight,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text('"${r.taunt}"',
+                  style: const TextStyle(
+                      color: glovoMuted, fontStyle: FontStyle.italic)),
+            ),
+            if (won) ...[
+              const SizedBox(height: 12),
+              Text('Nagroda: +${reward.toStringAsFixed(2)} zł',
+                  style: const TextStyle(
+                      color: glovoGreen, fontWeight: FontWeight.w800)),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('OK',
+                style: TextStyle(
+                    color: glovoYellow, fontWeight: FontWeight.w800)),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showLoginBonusDialog(int streak, double bonus) {
