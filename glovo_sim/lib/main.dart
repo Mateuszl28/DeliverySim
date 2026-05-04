@@ -5107,6 +5107,146 @@ class _CourierHomeState extends State<CourierHome>
     );
   }
 
+  Widget _careerCard() {
+    final m = _currentCareerMission;
+    if (m == null) {
+      return Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [glovoYellow.withValues(alpha: 0.25), glovoCard],
+          ),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: glovoYellow, width: 1.5),
+        ),
+        child: const Row(
+          children: [
+            Icon(Icons.emoji_events_rounded,
+                color: glovoYellow, size: 32),
+            SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Top Kurier Dzielnicy',
+                      style: TextStyle(
+                          fontWeight: FontWeight.w900, fontSize: 16)),
+                  Text('Wszystkie misje ukończone — szacun!',
+                      style:
+                          TextStyle(color: glovoMuted, fontSize: 11)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+    final cur = m.progress(this);
+    final ratio = (cur / m.target).clamp(0.0, 1.0);
+    final ready = _careerMissionReady;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [m.color.withValues(alpha: 0.22), glovoCard],
+        ),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: ready ? m.color : m.color.withValues(alpha: 0.4),
+          width: ready ? 1.8 : 1.2,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(m.chapter,
+              style: TextStyle(
+                  color: m.color,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 11,
+                  letterSpacing: 0.4)),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: m.color.withValues(alpha: 0.25),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(m.icon, color: m.color, size: 24),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(m.title,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w800, fontSize: 14)),
+                    Text(m.desc,
+                        style: const TextStyle(
+                            color: glovoMuted, fontSize: 11)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: LinearProgressIndicator(
+              value: ratio,
+              minHeight: 7,
+              backgroundColor: glovoCardLight,
+              valueColor: AlwaysStoppedAnimation(m.color),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Text('$cur/${m.target}',
+                  style: TextStyle(
+                      color: m.color,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12)),
+              const Spacer(),
+              Text(
+                  '+${m.reward.toStringAsFixed(0)} zł'
+                  '${m.xpReward > 0 ? " · +${m.xpReward} XP" : ""}'
+                  '${m.unlockZone != null ? " · 🔓 ${Zone.values.firstWhere((z) => z.name == m.unlockZone).label}" : ""}',
+                  style: const TextStyle(
+                      color: glovoGreen,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 11)),
+            ],
+          ),
+          if (ready) ...[
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: _claimCareerMission,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: m.color,
+                  foregroundColor: glovoDark,
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: const Text('Odbierz nagrodę',
+                    style: TextStyle(
+                        fontWeight: FontWeight.w900, fontSize: 14)),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   Widget _weeklyCard(WeeklyChallenge w) {
     return Container(
       padding: const EdgeInsets.all(14),
