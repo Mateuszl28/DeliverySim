@@ -2553,6 +2553,10 @@ class _CourierHomeState extends State<CourierHome>
   void _runRoute({required VoidCallback onComplete}) {
     final o = _currentOrder!;
     _progressTimer?.cancel();
+
+    // Maybe trigger a breakdown before we start the route
+    if (_maybeTriggerBreakdown(onComplete)) return;
+
     var secPerKm = _vehicle.secPerKm;
     if (_ownedGear.contains('gps')) secPerKm *= 0.85;
     final baseSec = (o.distanceKm * secPerKm).clamp(2.5, 30);
@@ -2564,6 +2568,8 @@ class _CourierHomeState extends State<CourierHome>
     var trafficTriggered = false;
     var trafficLightUsed = false;
     var phoneTriggered = false;
+    final routeKm = o.distanceKm;
+    var kmCounted = false;
 
     // Initial speed
     setState(() {
