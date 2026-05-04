@@ -1354,8 +1354,55 @@ class _CourierHomeState extends State<CourierHome>
           _maybeChangeWeather();
           _weatherCheckIn = 60 + _rng.nextInt(120);
         }
+        _tickCityEvent();
       });
     });
+  }
+
+  // ===== CITY EVENTS =====
+  void _tickCityEvent() {
+    final ev = _activeEvent;
+    if (ev != null) {
+      ev.remainingMin--;
+      if (ev.remainingMin <= 0) {
+        final endedZone = ev.zone;
+        _activeEvent = null;
+        _eventCheckIn = 30 + _rng.nextInt(90);
+        _showEventBanner(
+            'Wydarzenie się skończyło (${endedZone.label})', glovoMuted);
+        _saveState();
+      }
+      return;
+    }
+    _eventCheckIn--;
+    if (_eventCheckIn > 0) return;
+    _eventCheckIn = 60 + _rng.nextInt(180);
+    if (_rng.nextDouble() > 0.45) return; // 45% to actually fire
+    _spawnCityEvent();
+  }
+
+  void _spawnCityEvent() {
+    final kinds = CityEventKind.values;
+    final kind = kinds[_rng.nextInt(kinds.length)];
+    // 60% in player's zone, 40% somewhere else
+    final useOwn = _rng.nextDouble() < 0.6;
+    final pool = useOwn
+        ? <Zone>[_zone]
+        : Zone.values.where((z) => z != _zone).toList();
+    final zone = pool[_rng.nextInt(pool.length)];
+    final dur = 60 + _rng.nextInt(120); // 60-180 sim min
+    _activeEvent = CityEvent(kind: kind, zone: zone, remainingMin: dur);
+    final inMyZone = zone == _zone;
+    final boostStr = '${((kind.surgeBoost - 1) * 100).round()}%';
+    final demandStr = kind.demandMul >= 1
+        ? '+${((kind.demandMul - 1) * 100).round()}% zamówień'
+        : '−${((1 - kind.demandMul) * 100).round()}% zamówień';
+    final msg = inMyZone
+        ? '${kind.emoji} ${kind.label} — surge +$boostStr, $demandStr'
+        : '${kind.emoji} ${kind.label} w ${zone.label} — przejedź się!';
+    _showEventBanner(msg, kind.color);
+    AudioService.instance.sfx('chat_ding.mp3', volume: 0.5);
+    _saveState();
   }
 
   void _maybeChangeWeather() {
