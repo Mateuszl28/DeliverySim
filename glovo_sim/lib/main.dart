@@ -2681,6 +2681,11 @@ class _CourierHomeState extends State<CourierHome>
       if (step >= totalSteps) {
         t.cancel();
         AudioService.instance.stopLoop('engine');
+        if (!kmCounted && _vehicle != Vehicle.bike) {
+          _kmDriven[_vehicle.name] =
+              (_kmDriven[_vehicle.name] ?? 0) + routeKm;
+          kmCounted = true;
+        }
         setState(() {
           _currentSpeedKmh = 0;
           _currentTurn = null;
@@ -2688,6 +2693,181 @@ class _CourierHomeState extends State<CourierHome>
         onComplete();
       }
     });
+  }
+
+  // ===== VEHICLE BREAKDOWN =====
+  double _serviceCost() {
+    final v = _vehicle;
+    if (v == Vehicle.bike) return 0;
+    final km = _kmDriven[v.name] ?? 0;
+    final base = v == Vehicle.scooter ? 25.0 : 45.0;
+    return double.parse((base + km * 0.15).toStringAsFixed(2));
+  }
+
+  double _breakdownChance() {
+    final v = _vehicle;
+    if (v == Vehicle.bike) return 0;
+    final km = _kmDriven[v.name] ?? 0;
+    final threshold = v == Vehicle.scooter ? 60.0 : 120.0;
+    if (km <= threshold) return 0;
+    return ((km - threshold) / 250).clamp(0.0, 0.45);
+  }
+
+  bool _maybeTriggerBreakdown(VoidCallback onComplete) {
+    if (_breakdownActive) return false;
+    final p = _breakdownChance();
+    if (p <= 0 || _rng.nextDouble() > p) return false;
+    _breakdownActive = true;
+    _pendingRouteCallback = onComplete;
+    AudioService.instance.stopLoop('engine');
+    HapticFeedback.heavyImpact();
+    AudioService.instance.sfx('phone_ring.mp3', volume: 0.7);
+    setState(() {
+      _currentSpeedKmh = 0;
+      _currentTurn = null;
+    });
+    _showBreakdownDialog();
+    return true;
+  }
+
+  void _showBreakdownDialog() {
+    final cost = _serviceCost();
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: glovoCard,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.build_circle_rounded, color: glovoRed, size: 28),
+            SizedBox(width: 8),
+            Text('Awaria pojazdu!',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+                'Twój ${_vehicle.label.toLowerCase()} odmawia posłuszeństwa. Co robisz?',
+                style: const TextStyle(color: glovoMuted, fontSize: 13)),
+            const SizedBox(height: 14),
+            _breakdownOption(
+              icon: Icons.handyman_rounded,
+              color: glovoYellow,
+              title: 'Wezwij serwis',
+              subtitle: '−${cost.toStringAsFixed(2)} zł, pojazd jak nowy',
+              onTap: () {
+                Navigator.pop(ctx);
+                _payService();
+              },
+            ),
+            const SizedBox(height: 8),
+            _breakdownOption(
+              icon: Icons.warning_amber_rounded,
+              color: glovoOrange,
+              title: 'Zaryzykuj',
+              subtitle: '70% szansy że dojedziesz, 30% że trzeba odpuścić',
+              onTap: () {
+                Navigator.pop(ctx);
+                _riskBreakdown();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _breakdownOption({
+    required IconData icon,
+    required Color color,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withValues(alpha: 0.4)),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: color, size: 26),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w800, fontSize: 14)),
+                  Text(subtitle,
+                      style: const TextStyle(
+                          color: glovoMuted, fontSize: 11)),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right_rounded, color: glovoMuted),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _payService() {
+    final cost = _serviceCost();
+    setState(() {
+      _fuelCost += cost; // bookkeep as overhead, not consumed fuel — but it's a real expense
+      _kmDriven[_vehicle.name] = 0;
+      _breakdownActive = false;
+    });
+    AudioService.instance.sfx('cash.mp3', volume: 0.7);
+    _showEventBanner(
+        'Serwis: −${cost.toStringAsFixed(2)} zł — jedziemy dalej',
+        glovoYellow);
+    _saveState();
+    final cb = _pendingRouteCallback;
+    _pendingRouteCallback = null;
+    if (cb != null) _runRoute(onComplete: cb);
+  }
+
+  void _riskBreakdown() {
+    final win = _rng.nextDouble() < 0.7;
+    setState(() {
+      _breakdownActive = false;
+    });
+    final cb = _pendingRouteCallback;
+    _pendingRouteCallback = null;
+    if (win) {
+      _showEventBanner('Ryzyk-fizyk się opłacił — jedziemy', glovoGreen);
+      if (cb != null) _runRoute(onComplete: cb);
+    } else {
+      // Ride aborts: cancel the order, hit rating
+      const compensation = 0.0;
+      setState(() {
+        _cancelled++;
+        _gross += compensation;
+        _rating = max(4.20, _rating - 0.08);
+        _state = CourierState.searching;
+        _currentOrder = null;
+        _routeProgress = 0;
+        _kmDriven[_vehicle.name] = 0; // forced service after breakdown
+      });
+      AudioService.instance.sfx('phone_ring.mp3', volume: 0.5);
+      _showEventBanner(
+          'Pojazd padł — zamówienie anulowane, ocena spadła', glovoRed);
+      _saveState();
+      _scheduleNextOrder();
+    }
   }
 
   String _turnAt(double progress, {required String goingTo}) {
