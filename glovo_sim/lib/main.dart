@@ -621,6 +621,111 @@ class LeaderboardEntry {
       );
 }
 
+class Rival {
+  final String id;
+  final String name;
+  final String emoji;
+  final int level;
+  final String style; // short label
+  final double dailyAvg; // expected daily net
+  final String taunt;
+  const Rival({
+    required this.id,
+    required this.name,
+    required this.emoji,
+    required this.level,
+    required this.style,
+    required this.dailyAvg,
+    required this.taunt,
+  });
+}
+
+const _rivals = [
+  Rival(
+    id: 'kacper',
+    name: 'Kacper "Szybki" M.',
+    emoji: '🏍️',
+    level: 9,
+    style: 'Skuter, peak hours only',
+    dailyAvg: 95,
+    taunt: 'Spokojnie, zostawię ci paliwa.',
+  ),
+  Rival(
+    id: 'natalia',
+    name: 'Natalia "5★" S.',
+    emoji: '⭐',
+    level: 12,
+    style: 'Wilanów / VIP',
+    dailyAvg: 130,
+    taunt: 'Klienci mnie kochają — sorry.',
+  ),
+  Rival(
+    id: 'bartek',
+    name: 'Bartek "Ciężarówa" R.',
+    emoji: '🚚',
+    level: 14,
+    style: 'Auto, zakupy XL',
+    dailyAvg: 150,
+    taunt: 'Ja wiozę paczki, ty wiozesz pizzę.',
+  ),
+  Rival(
+    id: 'oliwia',
+    name: 'Oliwia "GPS" G.',
+    emoji: '📍',
+    level: 7,
+    style: 'Centrum, optymalne trasy',
+    dailyAvg: 75,
+    taunt: 'Krótszą trasę niż ty znajdę.',
+  ),
+  Rival(
+    id: 'igor',
+    name: 'Igor "Rower" F.',
+    emoji: '🚲',
+    level: 5,
+    style: 'Rower, eko-wojownik',
+    dailyAvg: 55,
+    taunt: 'Bez paliwa = bez kosztów. Czaisz?',
+  ),
+];
+
+class DailyDuel {
+  final String rivalId;
+  final double targetNet;
+  final String dateKey; // YYYY-MM-DD
+  double progressNet;
+  bool resolved;
+
+  DailyDuel({
+    required this.rivalId,
+    required this.targetNet,
+    required this.dateKey,
+    this.progressNet = 0,
+    this.resolved = false,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'rivalId': rivalId,
+        'targetNet': targetNet,
+        'dateKey': dateKey,
+        'progressNet': progressNet,
+        'resolved': resolved,
+      };
+
+  static DailyDuel? fromJson(Map<String, dynamic> j) {
+    try {
+      return DailyDuel(
+        rivalId: j['rivalId'] as String,
+        targetNet: (j['targetNet'] as num).toDouble(),
+        dateKey: j['dateKey'] as String,
+        progressNet: (j['progressNet'] as num?)?.toDouble() ?? 0,
+        resolved: j['resolved'] as bool? ?? false,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
 const _ghostNames = [
   'Kacper M.',
   'Aleksandra W.',
