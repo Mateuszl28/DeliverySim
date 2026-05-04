@@ -3303,6 +3303,7 @@ class _CourierHomeState extends State<CourierHome>
                 ],
               ),
             ),
+          if (online && _activeEvent != null) _eventChip(),
           Row(
             children: [
               _statTile(Icons.payments_rounded,
@@ -3357,6 +3358,45 @@ class _CourierHomeState extends State<CourierHome>
                   color: _weather.color,
                   fontWeight: FontWeight.w700,
                   fontSize: 11)),
+        ],
+      ),
+    );
+  }
+
+  Widget _eventChip() {
+    final ev = _activeEvent!;
+    final inMyZone = ev.zone == _zone;
+    final h = ev.remainingMin ~/ 60;
+    final m = ev.remainingMin % 60;
+    final timeStr = h > 0 ? '${h}h ${m}min' : '${m}min';
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: ev.kind.color.withValues(alpha: inMyZone ? 0.30 : 0.15),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: ev.kind.color.withValues(alpha: inMyZone ? 0.7 : 0.3),
+          width: 1,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(ev.kind.emoji, style: const TextStyle(fontSize: 14)),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              inMyZone
+                  ? '${ev.kind.label} · $timeStr'
+                  : '${ev.kind.label} w ${ev.zone.label} · $timeStr',
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                  color: ev.kind.color,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 12),
+            ),
+          ),
         ],
       ),
     );
