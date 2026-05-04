@@ -7580,6 +7580,14 @@ class _CourierHomeState extends State<CourierHome>
           border: true,
           onTap: null,
         );
+      case CourierState.findingApartment:
+        return _bigButton(
+          label: 'Znajdź właściwe drzwi',
+          color: glovoCard,
+          textColor: glovoMuted,
+          border: true,
+          onTap: null,
+        );
       case CourierState.atCustomer:
         if (_customerPhase == 0) {
           return _bigButton(
